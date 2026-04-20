@@ -1,0 +1,12 @@
+NETGEAR_AP[123]: AP_NAME=NG-Lobby client=aa:bb:cc:dd:ee:11 associated ssid=GuestWiFi radio=5G channel=44
+NETGEAR_AP[123]: AP=NG-Lobby client=aa:bb:cc:dd:ee:12 auth failed reason=bad_psk ssid=GuestWiFi
+NETGEAR_AP[123]: AP=NG-Lobby client=aa:bb:cc:dd:ee:12 disassociated reason=4 ssid=GuestWiFi
+NETGEAR_AP[123]: AP=NG-Lobby client=aa:bb:cc:dd:ee:12 deauthenticated reason=2 ssid=GuestWiFi
+NETGEAR_AP[123]: AP=NG-Lobby client=aa:bb:cc:dd:ee:13 roam failed target=NG-Conf ssid=GuestWiFi
+NETGEAR_AP[123]: AP=NG-Lobby poor_rssi client=aa:bb:cc:dd:ee:13 rssi=-79 ssid=GuestWiFi
+NETGEAR_AP[123]: AP=NG-Lobby interference detected channel=44
+NETGEAR_AP[123]: AP=NG-Rooftop state down
+NETGEAR_AP[123]: AP=NG-Lobby client=aa:bb:cc:dd:ee:13 dhcp timeout ssid=GuestWiFi
+NETGEAR_AP[123]: AP=NG-Lobby client=aa:bb:cc:dd:ee:13 dns timeout ssid=GuestWiFi
+NETGEAR_AP[123]: AP=NG-Rooftop dfs radar hit channel=100
+

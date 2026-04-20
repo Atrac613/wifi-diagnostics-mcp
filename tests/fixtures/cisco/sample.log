@@ -1,0 +1,13 @@
+%APF-6-CLIENT_ASSOC: AP "AP-Lobby" Interface Dot11Radio0, Station aa:bb:cc:dd:ee:01 Associated KEY_MGMT[WPA2] SSID "CorpWiFi"
+%DOT1X-5-FAIL: Station aa:bb:cc:dd:ee:02 on AP "AP-Lobby" SSID "CorpWiFi" authentication failed reason 23
+%APF-4-CLIENT_DEAUTH: AP "AP-Lobby" Interface Dot11Radio0, Station aa:bb:cc:dd:ee:02 Deauthenticated reason 2 SSID "CorpWiFi"
+%ROAM-4-FAIL: Client aa:bb:cc:dd:ee:03 roam failed from AP "AP-East" to AP "AP-West" SSID "CorpWiFi"
+%SPECTRUM-4-POOR_RSSI: AP "AP-East" client aa:bb:cc:dd:ee:03 RSSI -82 SSID "CorpWiFi"
+%RRM-4-CHANNEL_INTERFERENCE: AP "AP-East" slot 1 detected interference on channel 36
+%CAPWAP-3-AP_DOWN: AP "AP-West" is down
+%DFS-4-RADAR: AP "AP-Roof" slot 1 radar detected on channel 52
+%DOT1X-6-SUCCESS: Station aa:bb:cc:dd:ee:01 on AP "AP-Lobby" SSID "CorpWiFi" authenticated
+<6>13279: AP:00f6.6353.1418: *Apr 20 08:53:30.767: %DOT11-6-ASSOC: Interface Dot11Radio0, Station   c2b2.f9fd.f91f REAP Associated KEY_MGMT[Open]
+<132>Cisco-00f8.2c26.6580: *Dot1x_NW_MsgTask_0: Apr 20 17:53:42.334: %DOT1X-4-MAX_EAPOL_KEY_RETRANS: 1x_ptsm.c:558 Max EAPOL-key M1 retransmissions exceeded for client ae:b0:9e:57:34:8c
+<132>Cisco-00f8.2c26.6580: *apfMsConnTask_0: Apr 20 18:48:25.810: %APF-4-ASSOCREQ_PROC_FAILED: apf_80211.c:11180 Failed to process an association request from 50:14:79:25:f4:12. WLAN:2, SSID:ChaCha. Max Sta - Load balance decision failure.
+<6>13281: AP:00f6.6353.1418: *Apr 20 09:32:06.595: %DOT11-6-DISASSOC: Interface Dot11Radio0, Deauthenticating Station b095.75f5.19a2 Sending station has left the BSS
