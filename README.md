@@ -7,8 +7,9 @@
 It ingests syslog from Wi-Fi APs and controllers, stores raw messages, normalizes
 Wi-Fi-relevant events, and exposes fact-centered MCP tools for LLM clients.
 
-The current implementation targets Cisco and Netgear first, while keeping the
-parser and storage layers extensible for additional vendors and backends.
+The current implementation targets Cisco first, while keeping the parser and
+storage layers extensible for additional vendors and backends. Netgear support
+is planned but not yet part of the supported public surface.
 
 ## Status
 
@@ -17,7 +18,8 @@ This repository is usable today as a practical Wi-Fi diagnostics MVP.
 What it is:
 
 - A Wi-Fi-specific syslog ingestion pipeline with raw and normalized storage
-- A plugin-style parser architecture for Cisco, Netgear, and generic fallback
+- A plugin-style parser architecture for Cisco, generic fallback, and future
+  vendor expansion
 - A diagnostics-oriented MCP server with tools, resources, and prompts
 - A lightweight analytics layer for health score, auth failures, disconnects,
   roaming issues, and AP/client instability
@@ -42,7 +44,8 @@ What it is not:
   - stdio
   - HTTP JSON-RPC on `POST /mcp`
   - SSE response mode on `POST /mcp?stream=1`
-- Cisco and Netgear regex-based parsers with unknown-event retention
+- A production-focused Cisco parser plus generic fallback, with Netgear support
+  planned
 - Wi-Fi analytics for:
   - health score
   - auth failures
@@ -175,19 +178,11 @@ client Wi-Fi failure signal.
 
 ### Netgear
 
-Current Netgear normalization includes:
+Netgear support is planned.
 
-- `client_associated`
-- `client_disassociated`
-- `client_deauthenticated`
-- `auth_failure`
-- `roam_failure`
-- `dhcp_issue`
-- `dns_issue`
-- `poor_rssi`
-- `channel_interference`
-- `ap_down`
-- `radar_or_dfs_event`
+This repository already contains early parser and fixture scaffolding for
+Netgear log formats, but Netgear is not yet treated as a supported public
+target in the same way as Cisco.
 
 ### Unknown and Unsupported Events
 
@@ -336,8 +331,8 @@ paired with `MCP_HTTP_AUTH_TOKEN`.
 Cisco Mobility Express and related Cisco AP/controller deployments often behave
 as if syslog is sent to UDP/514 with limited port customization in the UI.
 
-Netgear devices typically expose remote syslog settings in the web UI with a
-server address and logging options.
+Netgear remote syslog handling is planned, and the repository already contains
+early fixtures/parser scaffolding to support that future work.
 
 This server can receive higher, non-privileged ports by default, but it can also
 be deployed on UDP/514 when the runtime has permission to bind that port.
@@ -470,7 +465,8 @@ python3 -m unittest tests.test_tools -v
 ## Limitations
 
 - Parsing is regex-based and intentionally conservative
-- Not every Cisco or Netgear firmware variant is covered yet
+- Cisco coverage is still intentionally partial, and Netgear is not yet a
+  supported public target
 - Existing `normalized_events` are not automatically backfilled when parser
   logic changes
 - `ingest_sample_logs` is intentionally restricted to configured sample roots
