@@ -25,11 +25,19 @@ class Repository(Protocol):
 
     def get_raw_records(self, raw_ids: list[int]) -> dict[int, RawSyslogRecord]: ...
 
+    def list_raw_syslog(self) -> list[RawSyslogRecord]: ...
+
+    def normalized_event_timestamps_by_raw_id(self) -> dict[int, datetime]: ...
+
+    def delete_all_normalized_events(self) -> None: ...
+
     def list_ap_metadata(self) -> list[APMetadata]: ...
 
     def find_ap_metadata(self, ap_name: str) -> APMetadata | None: ...
 
     def upsert_ap_metadata(self, metadata: APMetadata) -> None: ...
+
+    def canonicalize_ap_events(self, ap_mac: str, ap_name: str) -> None: ...
 
     def upsert_client_alias(self, alias: ClientAlias) -> None: ...
 
@@ -260,6 +268,40 @@ class SQLiteRepository:
             for row in rows
         }
 
+    def list_raw_syslog(self) -> list[RawSyslogRecord]:
+        with self._lock:
+            rows = self._conn.execute("SELECT * FROM raw_syslog ORDER BY id").fetchall()
+        return [
+            RawSyslogRecord(
+                id=int(row["id"]),
+                received_at=datetime.fromisoformat(row["received_at"]),
+                sender_ip=row["sender_ip"],
+                raw_message=row["raw_message"],
+                vendor_guess=row["vendor_guess"],
+                parse_status=row["parse_status"],
+                parse_error=row["parse_error"],
+            )
+            for row in rows
+        ]
+
+    def normalized_event_timestamps_by_raw_id(self) -> dict[int, datetime]:
+        with self._lock:
+            rows = self._conn.execute(
+                """
+                SELECT raw_event_id, ts
+                FROM normalized_events
+                WHERE raw_event_id IS NOT NULL
+                """
+            ).fetchall()
+        return {
+            int(row["raw_event_id"]): datetime.fromisoformat(row["ts"])
+            for row in rows
+        }
+
+    def delete_all_normalized_events(self) -> None:
+        with self._lock, self._conn:
+            self._conn.execute("DELETE FROM normalized_events")
+
     def list_ap_metadata(self) -> list[APMetadata]:
         with self._lock:
             rows = self._conn.execute(
@@ -284,11 +326,15 @@ class SQLiteRepository:
                 """
                 SELECT ap_name, vendor, ap_mac, mgmt_ip, location, model, notes
                 FROM ap_metadata
-                WHERE ap_name = ? OR ap_mac = ?
-                ORDER BY CASE WHEN ap_name = ? THEN 0 ELSE 1 END
+                WHERE ap_name = ? OR ap_mac = ? OR mgmt_ip = ?
+                ORDER BY CASE
+                    WHEN ap_name = ? THEN 0
+                    WHEN ap_mac = ? THEN 1
+                    ELSE 2
+                END
                 LIMIT 1
                 """,
-                (ap_name, ap_name, ap_name),
+                (ap_name, ap_name, ap_name, ap_name, ap_name),
             ).fetchone()
         if row is None:
             return None
@@ -311,8 +357,72 @@ class SQLiteRepository:
                     (metadata.ap_mac,),
                 ).fetchone()
                 if existing_by_mac is not None:
-                    canonical_name = existing_by_mac["ap_name"]
-                elif self._looks_like_mac(metadata.ap_name):
+                    existing_name = existing_by_mac["ap_name"]
+                    if self._looks_like_mac(existing_name) and not self._looks_like_mac(metadata.ap_name):
+                        canonical_name = metadata.ap_name
+                    else:
+                        canonical_name = existing_name
+                    if canonical_name != existing_name:
+                        conflicting_name = self._conn.execute(
+                            "SELECT ap_mac FROM ap_metadata WHERE ap_name = ?",
+                            (canonical_name,),
+                        ).fetchone()
+                        if conflicting_name is not None and conflicting_name["ap_mac"] != metadata.ap_mac:
+                            self._conn.execute(
+                                """
+                                UPDATE ap_metadata
+                                SET vendor = ?, ap_mac = ?, mgmt_ip = ?, location = ?, model = ?, notes = ?
+                                WHERE ap_name = ?
+                                """,
+                                (
+                                    metadata.vendor,
+                                    metadata.ap_mac,
+                                    metadata.mgmt_ip,
+                                    metadata.location,
+                                    metadata.model,
+                                    metadata.notes,
+                                    canonical_name,
+                                ),
+                            )
+                            self._conn.execute(
+                                "DELETE FROM ap_metadata WHERE ap_mac = ? AND ap_name != ?",
+                                (metadata.ap_mac, canonical_name),
+                            )
+                        else:
+                            self._conn.execute(
+                                """
+                                UPDATE ap_metadata
+                                SET ap_name = ?, vendor = ?, mgmt_ip = ?, location = ?, model = ?, notes = ?
+                                WHERE ap_mac = ?
+                                """,
+                                (
+                                    canonical_name,
+                                    metadata.vendor,
+                                    metadata.mgmt_ip,
+                                    metadata.location,
+                                    metadata.model,
+                                    metadata.notes,
+                                    metadata.ap_mac,
+                                ),
+                            )
+                    else:
+                        self._conn.execute(
+                            """
+                            UPDATE ap_metadata
+                            SET vendor = ?, mgmt_ip = ?, location = ?, model = ?, notes = ?
+                            WHERE ap_mac = ?
+                            """,
+                            (
+                                metadata.vendor,
+                                metadata.mgmt_ip,
+                                metadata.location,
+                                metadata.model,
+                                metadata.notes,
+                                metadata.ap_mac,
+                            ),
+                        )
+                    return
+                if self._looks_like_mac(metadata.ap_name):
                     canonical_name = metadata.ap_mac
             self._conn.execute(
                 """
@@ -336,23 +446,17 @@ class SQLiteRepository:
                     metadata.notes,
                 ),
             )
-            if metadata.ap_mac and not self._looks_like_mac(metadata.ap_name) and metadata.ap_name != canonical_name:
-                self._conn.execute(
-                    """
-                    UPDATE ap_metadata
-                    SET ap_name = ?, vendor = ?, mgmt_ip = ?, location = ?, model = ?, notes = ?
-                    WHERE ap_mac = ?
-                    """,
-                    (
-                        metadata.ap_name,
-                        metadata.vendor,
-                        metadata.mgmt_ip,
-                        metadata.location,
-                        metadata.model,
-                        metadata.notes,
-                        metadata.ap_mac,
-                    ),
-                )
+
+    def canonicalize_ap_events(self, ap_mac: str, ap_name: str) -> None:
+        with self._lock, self._conn:
+            self._conn.execute(
+                """
+                UPDATE normalized_events
+                SET ap_name = ?
+                WHERE ap_mac = ?
+                """,
+                (ap_name, ap_mac),
+            )
 
     def upsert_client_alias(self, alias: ClientAlias) -> None:
         with self._lock, self._conn:

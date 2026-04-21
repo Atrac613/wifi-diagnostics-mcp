@@ -8,7 +8,7 @@ from .base import BaseParser, normalize_mac
 
 class CiscoParser(BaseParser):
     vendor_name = Vendor.CISCO.value
-    parser_version = "cisco-regex-1.3"
+    parser_version = "cisco-regex-1.9"
 
     _assoc = re.compile(
         r'AP "(?P<ap_name>[^"]+)".*?Interface (?P<radio>[A-Za-z0-9/]+), '
@@ -28,8 +28,8 @@ class CiscoParser(BaseParser):
     _mobility_express_disassoc = re.compile(
         r"AP:(?P<ap_mac>(?:[0-9A-Fa-f]{4}\.){2}[0-9A-Fa-f]{4}).*?"
         r"%DOT11-6-DISASSOC:\s+Interface\s+(?P<radio>\S+),\s+Deauthenticating Station\s+"
-        r"(?P<client_mac>(?:[0-9A-Fa-f]{4}\.){2}[0-9A-Fa-f]{4}|(?:[0-9A-Fa-f]{2}[:.-]){5}[0-9A-Fa-f]{2})\s+"
-        r"(?P<reason>.+)$"
+        r"(?P<client_mac>(?:[0-9A-Fa-f]{4}\.){2}[0-9A-Fa-f]{4}|(?:[0-9A-Fa-f]{2}[:.-]){5}[0-9A-Fa-f]{2})"
+        r"(?:\s+(?P<reason>.+))?$"
     )
     _deauth = re.compile(
         r'AP "(?P<ap_name>[^"]+)".*?Station (?P<client_mac>(?:[0-9A-Fa-f]{2}[:.-]){5}[0-9A-Fa-f]{2}) '
@@ -44,6 +44,29 @@ class CiscoParser(BaseParser):
         r"%DOT1X-4-MAX_EAPOL_KEY_RETRANS:.*?client\s+"
         r"(?P<client_mac>(?:[0-9A-Fa-f]{4}\.){2}[0-9A-Fa-f]{4}|(?:[0-9A-Fa-f]{2}[:.-]){5}[0-9A-Fa-f]{2})"
     )
+    _mobility_express_invalid_replay_ctr = re.compile(
+        r"(?:Cisco-|AP:)(?P<ap_mac>(?:[0-9A-Fa-f]{4}\.){2}[0-9A-Fa-f]{4}).*?"
+        r"%DOT1X-3-INVALID_REPLAY_CTR:.*?client\s+"
+        r"(?P<client_mac>(?:[0-9A-Fa-f]{4}\.){2}[0-9A-Fa-f]{4}|(?:[0-9A-Fa-f]{2}[:.-]){5}[0-9A-Fa-f]{2})"
+    )
+    _radio_reset = re.compile(
+        r"AP:(?P<ap_mac>(?:[0-9A-Fa-f]{4}\.){2}[0-9A-Fa-f]{4}).*?"
+        r"%DOT11-5-EXPECTED_RADIO_RESET:\s+Restarting Radio interface\s+"
+        r"(?P<radio>\S+)\s+due to the reason code\s+(?P<reason>\d+)"
+    )
+    _radio_link_updown = re.compile(
+        r"AP:(?P<ap_mac>(?:[0-9A-Fa-f]{4}\.){2}[0-9A-Fa-f]{4}).*?"
+        r"%(?P<mnemonic>LINK-6-UPDOWN|LINEPROTO-5-UPDOWN):\s+"
+        r"(?:Line protocol on Interface|Interface)\s+(?P<radio>\S+),\s+changed state to\s+(?P<state>up|down)"
+    )
+    _radio_link_changed = re.compile(
+        r"AP:(?P<ap_mac>(?:[0-9A-Fa-f]{4}\.){2}[0-9A-Fa-f]{4}).*?"
+        r"%LINK-5-CHANGED:\s+Interface\s+(?P<radio>\S+),\s+changed state to\s+(?P<state>\S+)"
+    )
+    _cleanair_state = re.compile(
+        r"AP:(?P<ap_mac>(?:[0-9A-Fa-f]{4}\.){2}[0-9A-Fa-f]{4}).*?"
+        r"%CLEANAIR-6-STATE:\s+Slot\s+(?P<slot>\d+)\s+(?P<state>enabled|down)"
+    )
     _osapi_noise = re.compile(
         r"(?:Cisco-|AP:)(?P<ap_mac>(?:[0-9A-Fa-f]{4}\.){2}[0-9A-Fa-f]{4}).*?"
         r"%(?P<mnemonic>OSAPI-[0-9]-[A-Z0-9_]+):"
@@ -57,12 +80,52 @@ class CiscoParser(BaseParser):
         r"%(?P<mnemonic>APF-6-USE_DEFAULT_CIPHER_SUITE):.*?mobile\s+"
         r"(?P<client_mac>(?:[0-9A-Fa-f]{4}\.){2}[0-9A-Fa-f]{4}|(?:[0-9A-Fa-f]{2}[:.-]){5}[0-9A-Fa-f]{2})"
     )
+    _log_q_ind_default_cipher = re.compile(
+        r"(?:Cisco-|AP:)(?P<ap_mac>(?:[0-9A-Fa-f]{4}\.){2}[0-9A-Fa-f]{4}).*?"
+        r"%LOG-6-Q_IND:.*?Using default settings for Group Management Cipher Suite for mobile\s+"
+        r"(?P<client_mac>(?:[0-9A-Fa-f]{4}\.){2}[0-9A-Fa-f]{4}|(?:[0-9A-Fa-f]{2}[:.-]){5}[0-9A-Fa-f]{2})"
+    )
     _assocreq_proc_failed = re.compile(
         r"(?:Cisco-|AP:)(?P<ap_mac>(?:[0-9A-Fa-f]{4}\.){2}[0-9A-Fa-f]{4}).*?"
         r"%APF-4-ASSOCREQ_PROC_FAILED:.*?association request from\s+"
         r"(?P<client_mac>(?:[0-9A-Fa-f]{4}\.){2}[0-9A-Fa-f]{4}|(?:[0-9A-Fa-f]{2}[:.-]){5}[0-9A-Fa-f]{2})\.\s+"
         r"WLAN:(?P<wlan_id>\d+),\s+SSID:(?P<ssid>[^.]+)\.\s+"
         r"(?P<reason>.*?)(?:\.\[\.\.\.|\.?$)"
+    )
+    _assoc_req_failed_radio_disabled = re.compile(
+        r"(?:Cisco-|AP:)(?P<controller_ap_mac>(?:[0-9A-Fa-f]{4}\.){2}[0-9A-Fa-f]{4}).*?"
+        r"%APF-3-ASSOC_REQ_FAILED:.*?assoc request from mobile\s+"
+        r"(?P<client_mac>(?:[0-9A-Fa-f]{4}\.){2}[0-9A-Fa-f]{4}|(?:[0-9A-Fa-f]{2}[:.-]){5}[0-9A-Fa-f]{2})\s+"
+        r"Since\s+(?P<radio>[A-Za-z0-9]+(?:\s+\d+)?)\s+is not Enabled for AP:(?P<target_ap_name>\S+)\s+"
+        r"MAC:(?P<target_ap_mac>(?:[0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2})"
+    )
+    _mobile_station_not_found = re.compile(
+        r"(?:Cisco-|AP:)(?P<ap_mac>(?:[0-9A-Fa-f]{4}\.){2}[0-9A-Fa-f]{4}).*?"
+        r"%APF-4-MOBILESTATION_NOT_FOUND:.*?Could not find the mobile\s+"
+        r"(?P<client_mac>(?:[0-9A-Fa-f]{4}\.){2}[0-9A-Fa-f]{4}|(?:[0-9A-Fa-f]{2}[:.-]){5}[0-9A-Fa-f]{2})"
+        r"\s+in internal database"
+    )
+    _safec_error = re.compile(
+        r"(?:Cisco-|AP:)(?P<ap_mac>(?:[0-9A-Fa-f]{4}\.){2}[0-9A-Fa-f]{4}).*?"
+        r"%SAFEC-3-SAFEC_ERROR:.*?DATA INCONSISTENCY:\s+\(\d+\)\s+"
+        r"(?P<operation>[A-Za-z0-9_]+):\s+(?P<detail>.+)$"
+    )
+    _log_q_ind_assocreq = re.compile(
+        r"(?:Cisco-|AP:)(?P<ap_mac>(?:[0-9A-Fa-f]{4}\.){2}[0-9A-Fa-f]{4}).*?"
+        r"%LOG-[46]-Q_IND:.*?association request from\s+"
+        r"(?P<client_mac>(?:[0-9A-Fa-f]{4}\.){2}[0-9A-Fa-f]{4}|(?:[0-9A-Fa-f]{2}[:.-]){5}[0-9A-Fa-f]{2})\.\s+"
+        r"WLAN:(?P<wlan_id>\d+),\s+SSID:(?P<ssid>[^.]+)\.\s+"
+        r"(?P<reason>.*?)(?:\.\[\.\.\.|\.?$)"
+    )
+    _aaa_auth_admin_user = re.compile(
+        r"(?:Cisco-|AP:)(?P<ap_mac>(?:[0-9A-Fa-f]{4}\.){2}[0-9A-Fa-f]{4}).*?"
+        r"%(?P<mnemonic>AAA-5-AAA_AUTH_ADMIN_USER):"
+    )
+    _dot1x_11r_forced_auth = re.compile(
+        r"(?:Cisco-|AP:)(?P<ap_mac>(?:[0-9A-Fa-f]{4}\.){2}[0-9A-Fa-f]{4}).*?"
+        r"%DOT1X-6-11R_FORCED_AUTH:.*?FT Auth successful\.\s+Moving client\s+"
+        r"(?P<client_mac>(?:[0-9A-Fa-f]{4}\.){2}[0-9A-Fa-f]{4}|(?:[0-9A-Fa-f]{2}[:.-]){5}[0-9A-Fa-f]{2})"
+        r"\s+to forced auth state"
     )
     _auth_success = re.compile(
         r'Station (?P<client_mac>(?:[0-9A-Fa-f]{2}[:.-]){5}[0-9A-Fa-f]{2}).*?AP "(?P<ap_name>[^"]+)".*?'
@@ -105,10 +168,22 @@ class CiscoParser(BaseParser):
             (self._deauth, self._build_deauth),
             (self._auth_failure, self._build_auth_failure),
             (self._mobility_express_auth_failure, self._build_mobility_express_auth_failure),
+            (self._mobility_express_invalid_replay_ctr, self._build_mobility_express_invalid_replay_ctr),
+            (self._radio_reset, self._build_radio_reset),
+            (self._radio_link_updown, self._build_radio_link_updown),
+            (self._radio_link_changed, self._build_radio_link_changed),
+            (self._cleanair_state, self._build_cleanair_state),
             (self._osapi_noise, self._build_osapi_noise),
             (self._radius_override_disabled, self._build_radius_override_disabled),
             (self._use_default_cipher_suite, self._build_use_default_cipher_suite),
+            (self._log_q_ind_default_cipher, self._build_log_q_ind_default_cipher),
             (self._assocreq_proc_failed, self._build_assocreq_proc_failed),
+            (self._assoc_req_failed_radio_disabled, self._build_assoc_req_failed_radio_disabled),
+            (self._mobile_station_not_found, self._build_mobile_station_not_found),
+            (self._safec_error, self._build_safec_error),
+            (self._log_q_ind_assocreq, self._build_log_q_ind_assocreq),
+            (self._aaa_auth_admin_user, self._build_aaa_auth_admin_user),
+            (self._dot1x_11r_forced_auth, self._build_dot1x_11r_forced_auth),
             (self._auth_success, self._build_auth_success),
             (self._roam_failure, self._build_roam_failure),
             (self._roam_success, self._build_roam_success),
@@ -167,10 +242,14 @@ class CiscoParser(BaseParser):
 
     def _build_mobility_express_disassoc(self, record: RawSyslogRecord, match: re.Match[str]):
         ap_mac = normalize_mac(match.group("ap_mac"))
-        reason = self._slug_reason(match.group("reason"))
+        raw_reason = match.group("reason")
+        reason = self._slug_reason(raw_reason)
+        event_type = EventType.CLIENT_DEAUTHENTICATED
+        if reason == "sending_station_has_left_the_bss":
+            event_type = EventType.CLIENT_DISASSOCIATED
         return self.make_event(
             record,
-            event_type=EventType.CLIENT_DISASSOCIATED,
+            event_type=event_type,
             device_id=ap_mac or record.sender_ip,
             ap_name=self._mobility_express_ap_name(record, ap_mac),
             ap_mac=ap_mac,
@@ -215,6 +294,99 @@ class CiscoParser(BaseParser):
             severity=Severity.ERROR,
         )
 
+    def _build_mobility_express_invalid_replay_ctr(
+        self,
+        record: RawSyslogRecord,
+        match: re.Match[str],
+    ):
+        ap_mac = normalize_mac(match.group("ap_mac"))
+        return self.make_event(
+            record,
+            event_type=EventType.AUTH_FAILURE,
+            device_id=ap_mac or record.sender_ip,
+            ap_name=self._mobility_express_ap_name(record, ap_mac),
+            ap_mac=ap_mac,
+            client_mac=match.group("client_mac"),
+            reason_code="invalid_replay_counter",
+            severity=Severity.ERROR,
+        )
+
+    def _build_radio_reset(self, record: RawSyslogRecord, match: re.Match[str]):
+        ap_mac = normalize_mac(match.group("ap_mac"))
+        return self.make_event(
+            record,
+            event_type=EventType.AP_DOWN,
+            device_id=ap_mac or record.sender_ip,
+            ap_name=self._mobility_express_ap_name(record, ap_mac),
+            ap_mac=ap_mac,
+            radio=match.group("radio"),
+            reason_code=f"radio_reset:{match.group('reason')}",
+            severity=Severity.WARNING,
+        )
+
+    def _build_radio_link_updown(self, record: RawSyslogRecord, match: re.Match[str]):
+        ap_mac = normalize_mac(match.group("ap_mac"))
+        state = match.group("state").lower()
+        return self.make_event(
+            record,
+            event_type=EventType.AP_UP if state == "up" else EventType.AP_DOWN,
+            device_id=ap_mac or record.sender_ip,
+            ap_name=self._mobility_express_ap_name(record, ap_mac),
+            ap_mac=ap_mac,
+            radio=match.group("radio"),
+            reason_code=f"radio_state:{state}",
+            severity=Severity.INFO if state == "up" else Severity.WARNING,
+        )
+
+    def _build_radio_link_changed(self, record: RawSyslogRecord, match: re.Match[str]):
+        ap_mac = normalize_mac(match.group("ap_mac"))
+        state = self._slug_reason(match.group("state")) or "changed"
+        event_type = EventType.AP_UP if state == "up" else EventType.AP_DOWN
+        severity = Severity.INFO if state == "up" else Severity.WARNING
+        return self.make_event(
+            record,
+            event_type=event_type,
+            device_id=ap_mac or record.sender_ip,
+            ap_name=self._mobility_express_ap_name(record, ap_mac),
+            ap_mac=ap_mac,
+            radio=match.group("radio"),
+            reason_code=f"radio_state:{state}",
+            severity=severity,
+        )
+
+    def _build_cleanair_state(self, record: RawSyslogRecord, match: re.Match[str]) -> ParseOutcome:
+        ap_mac = normalize_mac(match.group("ap_mac"))
+        slot = match.group("slot")
+        state = match.group("state").lower()
+        reason = f"cleanair_state_slot_{slot}_{state}"
+        if state == "enabled":
+            return ParseOutcome(
+                status=ParseStatus.UNKNOWN_EVENT,
+                event=self.make_event(
+                    record,
+                    event_type=EventType.UNKNOWN_WIFI_EVENT,
+                    device_id=ap_mac or record.sender_ip,
+                    ap_name=self._mobility_express_ap_name(record, ap_mac),
+                    ap_mac=ap_mac,
+                    radio=f"Slot{slot}",
+                    severity=Severity.DEBUG,
+                    reason_code=f"noise:{reason}",
+                ),
+            )
+        return ParseOutcome(
+            status=ParseStatus.UNKNOWN_EVENT,
+            event=self.make_event(
+                record,
+                event_type=EventType.UNKNOWN_WIFI_EVENT,
+                device_id=ap_mac or record.sender_ip,
+                ap_name=self._mobility_express_ap_name(record, ap_mac),
+                ap_mac=ap_mac,
+                radio=f"Slot{slot}",
+                severity=Severity.WARNING,
+                reason_code=reason,
+            ),
+        )
+
     def _build_osapi_noise(self, record: RawSyslogRecord, match: re.Match[str]):
         return self._build_noise_unknown(record, match.group("ap_mac"), match.group("mnemonic"))
 
@@ -229,6 +401,14 @@ class CiscoParser(BaseParser):
             client_mac=match.group("client_mac"),
         )
 
+    def _build_log_q_ind_default_cipher(self, record: RawSyslogRecord, match: re.Match[str]):
+        return self._build_noise_unknown(
+            record,
+            match.group("ap_mac"),
+            "APF-6-USE_DEFAULT_CIPHER_SUITE",
+            client_mac=match.group("client_mac"),
+        )
+
     def _build_noise_unknown(
         self,
         record: RawSyslogRecord,
@@ -236,6 +416,7 @@ class CiscoParser(BaseParser):
         mnemonic: str,
         *,
         client_mac: str | None = None,
+        reason_code: str | None = None,
     ) -> ParseOutcome:
         ap_mac = normalize_mac(ap_mac_raw)
         mnemonic = self._slug_reason(mnemonic)
@@ -249,14 +430,76 @@ class CiscoParser(BaseParser):
                 ap_mac=ap_mac,
                 client_mac=client_mac,
                 severity=Severity.DEBUG,
-                reason_code=f"noise:{mnemonic}" if mnemonic else "noise:osapi",
+                reason_code=reason_code or (f"noise:{mnemonic}" if mnemonic else "noise:osapi"),
             ),
         )
 
     def _build_assocreq_proc_failed(self, record: RawSyslogRecord, match: re.Match[str]):
+        return self._build_assocreq_failure(record, match, reason_prefix="assocreq_proc_failed")
+
+    def _build_assoc_req_failed_radio_disabled(self, record: RawSyslogRecord, match: re.Match[str]):
+        ap_mac = normalize_mac(match.group("target_ap_mac")) or normalize_mac(match.group("controller_ap_mac"))
+        return self.make_event(
+            record,
+            event_type=EventType.AUTH_FAILURE,
+            device_id=ap_mac or record.sender_ip,
+            ap_name=match.group("target_ap_name"),
+            ap_mac=ap_mac,
+            client_mac=match.group("client_mac"),
+            radio=match.group("radio").replace(" ", ""),
+            severity=Severity.ERROR,
+            reason_code="assoc_req_failed:radio_not_enabled",
+        )
+
+    def _build_mobile_station_not_found(self, record: RawSyslogRecord, match: re.Match[str]) -> ParseOutcome:
+        ap_mac = normalize_mac(match.group("ap_mac"))
+        return ParseOutcome(
+            status=ParseStatus.UNKNOWN_EVENT,
+            event=self.make_event(
+                record,
+                event_type=EventType.UNKNOWN_WIFI_EVENT,
+                device_id=ap_mac or record.sender_ip,
+                ap_name=self._mobility_express_ap_name(record, ap_mac),
+                ap_mac=ap_mac,
+                client_mac=match.group("client_mac"),
+                severity=Severity.INFO,
+                reason_code="mobile_station_not_found",
+            ),
+        )
+
+    def _build_safec_error(self, record: RawSyslogRecord, match: re.Match[str]) -> ParseOutcome:
+        ap_mac = normalize_mac(match.group("ap_mac"))
+        operation = self._slug_reason(match.group("operation")) or "safec"
+        detail = self._slug_reason(match.group("detail"))
+        reason_code = f"safec_error:{operation}"
+        if detail:
+            reason_code = f"{reason_code}_{detail}"
+        return ParseOutcome(
+            status=ParseStatus.UNKNOWN_EVENT,
+            event=self.make_event(
+                record,
+                event_type=EventType.UNKNOWN_WIFI_EVENT,
+                device_id=ap_mac or record.sender_ip,
+                ap_name=self._mobility_express_ap_name(record, ap_mac),
+                ap_mac=ap_mac,
+                severity=Severity.WARNING,
+                reason_code=reason_code,
+            ),
+        )
+
+    def _build_log_q_ind_assocreq(self, record: RawSyslogRecord, match: re.Match[str]):
+        return self._build_assocreq_failure(record, match, reason_prefix="assocreq_proc_failed")
+
+    def _build_assocreq_failure(
+        self,
+        record: RawSyslogRecord,
+        match: re.Match[str],
+        *,
+        reason_prefix: str,
+    ):
         ap_mac = normalize_mac(match.group("ap_mac"))
         reason = self._slug_reason(match.group("reason"))
-        reason_code = f"assocreq_proc_failed:{reason}" if reason else "assocreq_proc_failed"
+        reason_code = f"{reason_prefix}:{reason}" if reason else reason_prefix
         return self.make_event(
             record,
             event_type=EventType.AUTH_FAILURE,
@@ -267,6 +510,27 @@ class CiscoParser(BaseParser):
             ssid=match.group("ssid").strip(),
             severity=Severity.ERROR,
             reason_code=reason_code,
+        )
+
+    def _build_aaa_auth_admin_user(self, record: RawSyslogRecord, match: re.Match[str]):
+        return self._build_noise_unknown(
+            record,
+            match.group("ap_mac"),
+            match.group("mnemonic"),
+            reason_code="noise:aaa_auth_admin_user",
+        )
+
+    def _build_dot1x_11r_forced_auth(self, record: RawSyslogRecord, match: re.Match[str]):
+        ap_mac = normalize_mac(match.group("ap_mac"))
+        return self.make_event(
+            record,
+            event_type=EventType.ROAM_SUCCESS,
+            device_id=ap_mac or record.sender_ip,
+            ap_name=self._mobility_express_ap_name(record, ap_mac),
+            ap_mac=ap_mac,
+            client_mac=match.group("client_mac"),
+            severity=Severity.INFO,
+            reason_code="ft_auth_success",
         )
 
     def _build_auth_success(self, record: RawSyslogRecord, match: re.Match[str]):

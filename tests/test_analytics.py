@@ -117,6 +117,104 @@ class AnalyticsTests(unittest.TestCase):
         finally:
             noise_service.repository.close()
 
+    def test_mobile_station_not_found_does_not_reduce_score_or_rankings(self) -> None:
+        aux_service = WiFiDiagnosticsService(
+            SQLiteRepository(Path(self.temp_dir.name) / "mobile-station-not-found.db"),
+            AppConfig(db_path=Path(self.temp_dir.name) / "mobile-station-not-found.db"),
+        )
+        aux_service.repository.initialize()
+        try:
+            timestamp = utc_now().strftime("%b %d %H:%M:%S")
+            line = (
+                f"<132>Cisco-00f8.2c26.6580: *spamApTask0: {timestamp}.358: "
+                "%APF-4-MOBILESTATION_NOT_FOUND: apf_api.c:57734 Could not find the mobile "
+                "50:14:79:c8:69:55 in internal database"
+            )
+            for _ in range(10):
+                aux_service.ingest_syslog(line, sender_ip="198.51.100.200", vendor_override="cisco")
+            result = aux_service.get_wifi_health(60)
+            self.assertEqual(result["total_events"], 10)
+            self.assertEqual(result["wifi_health_score"], 100)
+            self.assertEqual(result["top_noisy_aps"], [])
+            self.assertEqual(result["top_unstable_clients"], [])
+            self.assertNotIn("unknown_wifi_event=", result["interpretation_hint"])
+        finally:
+            aux_service.repository.close()
+
+    def test_ap_status_keeps_mobile_station_not_found_in_latest_events(self) -> None:
+        aux_service = WiFiDiagnosticsService(
+            SQLiteRepository(Path(self.temp_dir.name) / "ap-status-aux.db"),
+            AppConfig(db_path=Path(self.temp_dir.name) / "ap-status-aux.db"),
+        )
+        aux_service.repository.initialize()
+        try:
+            timestamp = utc_now().strftime("%b %d %H:%M:%S")
+            line = (
+                f"<132>Cisco-00f8.2c26.6580: *spamApTask0: {timestamp}.358: "
+                "%APF-4-MOBILESTATION_NOT_FOUND: apf_api.c:57734 Could not find the mobile "
+                "50:14:79:c8:69:55 in internal database"
+            )
+            for _ in range(5):
+                aux_service.ingest_syslog(line, sender_ip="198.51.100.200", vendor_override="cisco")
+            result = aux_service.get_ap_status("00:f8:2c:26:65:80", 60)
+            self.assertEqual(result["event_counts_by_type"], {})
+            self.assertEqual(result["top_clients"], [])
+            self.assertEqual(len(result["latest_events"]), 5)
+            self.assertTrue(
+                all(event["reason_code"] == "mobile_station_not_found" for event in result["latest_events"])
+            )
+        finally:
+            aux_service.repository.close()
+
+    def test_safec_error_does_not_reduce_score_or_rankings(self) -> None:
+        aux_service = WiFiDiagnosticsService(
+            SQLiteRepository(Path(self.temp_dir.name) / "safec-error.db"),
+            AppConfig(db_path=Path(self.temp_dir.name) / "safec-error.db"),
+        )
+        aux_service.repository.initialize()
+        try:
+            timestamp = utc_now().strftime("%b %d %H:%M:%S")
+            line = (
+                f"<131>Cisco-00f8.2c26.6580: *apfMsConnTask_0: {timestamp}.103: "
+                "%SAFEC-3-SAFEC_ERROR: safecWrapper.c:57 DATA INCONSISTENCY: (22) "
+                "memcpy_s: n exceeds dmax"
+            )
+            for _ in range(8):
+                aux_service.ingest_syslog(line, sender_ip="198.51.100.200", vendor_override="cisco")
+            result = aux_service.get_wifi_health(60)
+            self.assertEqual(result["total_events"], 8)
+            self.assertEqual(result["wifi_health_score"], 100)
+            self.assertEqual(result["top_noisy_aps"], [])
+            self.assertEqual(result["top_unstable_clients"], [])
+            self.assertNotIn("unknown_wifi_event=", result["interpretation_hint"])
+        finally:
+            aux_service.repository.close()
+
+    def test_ap_status_keeps_safec_error_in_latest_events(self) -> None:
+        aux_service = WiFiDiagnosticsService(
+            SQLiteRepository(Path(self.temp_dir.name) / "ap-status-safec.db"),
+            AppConfig(db_path=Path(self.temp_dir.name) / "ap-status-safec.db"),
+        )
+        aux_service.repository.initialize()
+        try:
+            timestamp = utc_now().strftime("%b %d %H:%M:%S")
+            line = (
+                f"<131>Cisco-00f8.2c26.6580: *apfMsConnTask_0: {timestamp}.103: "
+                "%SAFEC-3-SAFEC_ERROR: safecWrapper.c:57 DATA INCONSISTENCY: (22) "
+                "memcpy_s: n exceeds dmax"
+            )
+            for _ in range(4):
+                aux_service.ingest_syslog(line, sender_ip="198.51.100.200", vendor_override="cisco")
+            result = aux_service.get_ap_status("00:f8:2c:26:65:80", 60)
+            self.assertEqual(result["event_counts_by_type"], {})
+            self.assertEqual(result["top_clients"], [])
+            self.assertEqual(len(result["latest_events"]), 4)
+            self.assertTrue(
+                all(event["reason_code"] == "safec_error:memcpy_s_n_exceeds_dmax" for event in result["latest_events"])
+            )
+        finally:
+            aux_service.repository.close()
+
     def test_ap_status_matches_aliases_by_name_or_mac(self) -> None:
         alias_service = WiFiDiagnosticsService(
             SQLiteRepository(Path(self.temp_dir.name) / "ap-alias.db"),
@@ -180,6 +278,36 @@ class AnalyticsTests(unittest.TestCase):
             self.assertEqual(result["ap_summary"]["ap_name"], "AP-Lobby")
             self.assertEqual(result["ap_summary"]["total_events"], 2)
             self.assertEqual({item["client_mac"] for item in result["top_clients"]}, {"aa:bb:cc:dd:ee:01", "aa:bb:cc:dd:ee:02"})
+        finally:
+            alias_service.repository.close()
+
+    def test_ap_status_uses_mgmt_ip_when_only_mac_alias_exists(self) -> None:
+        alias_service = WiFiDiagnosticsService(
+            SQLiteRepository(Path(self.temp_dir.name) / "ap-mgmt-ip.db"),
+            AppConfig(db_path=Path(self.temp_dir.name) / "ap-mgmt-ip.db"),
+        )
+        alias_service.repository.initialize()
+        try:
+            alias_service.repository.upsert_ap_metadata(
+                APMetadata(
+                    ap_name="00:f8:2c:26:65:80",
+                    vendor="cisco",
+                    ap_mac="00:f8:2c:26:65:80",
+                    mgmt_ip="198.51.100.200",
+                )
+            )
+            timestamp = utc_now().strftime("%b %d %H:%M:%S")
+            line = (
+                f"<131>Cisco-00f8.2c26.6580: *Dot1x_NW_MsgTask_0: {timestamp}.903: "
+                "%DOT1X-3-INVALID_REPLAY_CTR: 1x_eapkey.c:458 Invalid replay counter "
+                "from client e2:c9:fa:b6:ff:47 - got 00 00 00 00 00 00 00 02, expected "
+                "00 00 00 00 00 00 00 03"
+            )
+            alias_service.ingest_syslog(line, sender_ip="198.51.100.200", vendor_override="cisco")
+            result = alias_service.get_ap_status("198.51.100.200", 60)
+            self.assertEqual(result["ap_summary"]["ap_name"], "198.51.100.200")
+            self.assertEqual(result["event_counts_by_type"]["auth_failure"], 1)
+            self.assertEqual(result["latest_events"][0]["ap_name"], "198.51.100.200")
         finally:
             alias_service.repository.close()
 

@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from wifi_diagnostics_mcp.config import AppConfig
+from wifi_diagnostics_mcp.models import APMetadata
 from wifi_diagnostics_mcp.mcp.prompts import build_prompt_definitions
 from wifi_diagnostics_mcp.mcp.resources import build_resource_definitions
 from wifi_diagnostics_mcp.mcp.tools import build_tool_definitions
@@ -109,12 +110,49 @@ class MCPDefinitionsTests(unittest.TestCase):
             archive_repository.close()
 
     def test_search_wifi_events_only_returns_raw_when_requested(self) -> None:
-        default_payload = self.service.search_wifi_events(limit=1)
+        self.repository.upsert_ap_metadata(
+            APMetadata(
+                ap_name="AP-Office",
+                vendor="cisco",
+                ap_mac="00:f8:2c:26:65:80",
+                mgmt_ip="198.51.100.21",
+            )
+        )
+        default_payload = self.service.search_wifi_events(
+            limit=1,
+            vendor="cisco",
+            client_mac="ae:b0:9e:57:34:8c",
+            minutes=24 * 60,
+        )
         self.assertTrue(default_payload["matched_events"])
         self.assertNotIn("raw_message", default_payload["matched_events"][0])
+        self.assertEqual(default_payload["matched_events"][0]["ap_name"], "AP-Office")
 
-        with_raw = self.service.search_wifi_events(limit=1, include_raw=True)
+        with_raw = self.service.search_wifi_events(
+            limit=1,
+            include_raw=True,
+            vendor="cisco",
+            client_mac="ae:b0:9e:57:34:8c",
+            minutes=24 * 60,
+        )
         self.assertIn("raw_message", with_raw["matched_events"][0])
+
+    def test_search_wifi_events_falls_back_to_mgmt_ip_when_ap_name_is_only_mac(self) -> None:
+        self.repository.upsert_ap_metadata(
+            APMetadata(
+                ap_name="00:f8:2c:26:65:80",
+                vendor="cisco",
+                ap_mac="00:f8:2c:26:65:80",
+                mgmt_ip="198.51.100.200",
+            )
+        )
+        payload = self.service.search_wifi_events(
+            limit=1,
+            vendor="cisco",
+            client_mac="ae:b0:9e:57:34:8c",
+            minutes=24 * 60,
+        )
+        self.assertEqual(payload["matched_events"][0]["ap_name"], "198.51.100.200")
 
     def test_ingest_sample_logs_is_restricted_to_configured_roots(self) -> None:
         outside_path = Path(self.temp_dir.name) / "outside.log"

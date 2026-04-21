@@ -137,6 +137,16 @@ Current Cisco normalization includes practical support for:
 - `ap_down`
 - `radar_or_dfs_event`
 
+Recent Mobility Express-oriented coverage also includes examples such as:
+
+- `DOT1X-3-INVALID_REPLAY_CTR` as `auth_failure`
+- `DOT1X-6-11R_FORCED_AUTH` as `roam_success`
+- `APF-3-ASSOC_REQ_FAILED` as `auth_failure`
+- `DOT11-5-EXPECTED_RADIO_RESET` as a radio-scoped `ap_down`
+- `DOT11-6-DISASSOC` as `client_disassociated` or `client_deauthenticated`
+- `LINK-6-UPDOWN`, `LINEPROTO-5-UPDOWN`, and `LINK-5-CHANGED` as radio state changes
+- `LOG-4-Q_IND` / `LOG-6-Q_IND` association failures as `auth_failure`
+
 The Cisco parser also recognizes several controller/AP noise patterns and keeps
 them as `unknown_wifi_event` records tagged with `reason_code` values prefixed
 with `noise:` so they can be de-emphasized in health scoring.
@@ -146,6 +156,22 @@ Current noise tagging includes:
 - `OSAPI-*`
 - `APF-6-RADIUS_OVERRIDE_DISABLED`
 - `APF-6-USE_DEFAULT_CIPHER_SUITE`
+- `LOG-6-Q_IND` when it mirrors the default-cipher controller message
+- `AAA-5-AAA_AUTH_ADMIN_USER`
+- `CLEANAIR-6-STATE` when the state is `enabled`
+
+`CLEANAIR-6-STATE` with `down` is preserved as a low-priority unknown signal
+instead of being fully suppressed as noise.
+
+`APF-4-MOBILESTATION_NOT_FOUND` is also preserved as a low-priority unknown
+signal with `reason_code=mobile_station_not_found`. It stays searchable and
+visible in AP drilldowns, but it does not contribute to health-score penalties
+or AP/client issue rankings.
+
+`SAFEC-3-SAFEC_ERROR` is preserved in the same way with a compact
+`reason_code` such as `safec_error:memcpy_s_n_exceeds_dmax`, so internal
+controller instability remains visible without being mistaken for a direct
+client Wi-Fi failure signal.
 
 ### Netgear
 
@@ -370,6 +396,14 @@ If a sender omits timezone information in the syslog timestamp, this server uses
 stored normalized event timestamp back to UTC. It also applies a nearest-year
 heuristic to avoid year-rollover mistakes around January.
 
+When you change `SYSLOG_TIMESTAMP_TIMEZONE` for an existing deployment, already
+saved `normalized_events` will still keep the old interpretation. To rebuild
+them from `raw_syslog`, run:
+
+```bash
+python3 -m wifi_diagnostics_mcp.reparse_raw_syslog
+```
+
 ## Health Score
 
 The health score is a practical 0-100 heuristic, not a universal Wi-Fi truth.
@@ -392,6 +426,10 @@ Important nuance:
 - low observation volume is capped to avoid treating “no data” as perfect health
 - parser-tagged noise events with `reason_code` values starting with `noise:`
   are excluded from health score penalties and AP/client issue rankings
+- selected low-priority unknown signals such as `mobile_station_not_found`
+  and `safec_error:*`
+  are also excluded from health score penalties and AP/client issue rankings
+  while remaining visible in drilldown views
 - `search_wifi_events` returns normalized fields by default and only includes
   `raw_message` when `include_raw=true` is requested
 

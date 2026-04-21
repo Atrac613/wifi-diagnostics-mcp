@@ -75,6 +75,7 @@ class WiFiDiagnosticsService:
 
         event_id: int | None = None
         if outcome.event is not None:
+            self._canonicalize_event_ap_identity(outcome.event)
             event_id = self.repository.insert_normalized_event(outcome.event)
             if outcome.event.ap_name:
                 self.repository.upsert_ap_metadata(
@@ -85,6 +86,10 @@ class WiFiDiagnosticsService:
                         mgmt_ip=sender_ip,
                     )
                 )
+                if outcome.event.ap_mac and not self._looks_like_mac(outcome.event.ap_name):
+                    canonicalizer = getattr(self.repository, "canonicalize_ap_events", None)
+                    if callable(canonicalizer):
+                        canonicalizer(outcome.event.ap_mac, outcome.event.ap_name)
 
         return {
             "raw_event_id": raw_id,
@@ -124,6 +129,41 @@ class WiFiDiagnosticsService:
                 minutes=24 * 60,
                 vendor=vendor.lower() if vendor else None,
             ),
+        }
+
+    def reparse_saved_raw_syslog(self) -> dict[str, Any]:
+        raw_records = list(self.repository.list_raw_syslog())
+        previous_timestamps = self.repository.normalized_event_timestamps_by_raw_id()
+        self.repository.delete_all_normalized_events()
+
+        reparsed_rows = 0
+        corrected_timestamps = 0
+        parsed_rows = 0
+        unknown_rows = 0
+        failed_rows = 0
+
+        for record in raw_records:
+            result = self._reprocess_raw_record(record)
+            reparsed_rows += 1
+            if result["normalized_event_id"] is not None:
+                previous_ts = previous_timestamps.get(record.id or -1)
+                current_ts = result["normalized_event_ts"]
+                if previous_ts is not None and current_ts is not None and previous_ts != current_ts:
+                    corrected_timestamps += 1
+            if result["parse_status"] == ParseStatus.PARSED.value:
+                parsed_rows += 1
+            elif result["parse_status"] == ParseStatus.UNKNOWN_EVENT.value:
+                unknown_rows += 1
+            else:
+                failed_rows += 1
+
+        return {
+            "raw_records": len(raw_records),
+            "reparsed_rows": reparsed_rows,
+            "parsed_rows": parsed_rows,
+            "unknown_rows": unknown_rows,
+            "failed_rows": failed_rows,
+            "corrected_timestamps": corrected_timestamps,
         }
 
     def _resolve_sample_log_path(self, file_path: str) -> Path:
@@ -227,3 +267,69 @@ class WiFiDiagnosticsService:
                 handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
         except OSError as exc:  # pragma: no cover - defensive logging path
             logger.warning("failed to archive raw syslog to %s: %s", archive_path, exc)
+
+    def _reprocess_raw_record(self, record: RawSyslogRecord) -> dict[str, Any]:
+        vendor = self._resolve_vendor(record.raw_message, record.vendor_guess)
+        parser = self.parsers.get(vendor, self.parsers[Vendor.UNKNOWN.value])
+        try:
+            outcome = parser.parse(record)
+        except Exception as exc:  # pragma: no cover - defensive fallback
+            unknown_event = self.parsers[Vendor.UNKNOWN.value].build_unknown_event(record, vendor=vendor)
+            outcome = ParseOutcome(status=ParseStatus.FAILED, event=unknown_event.event, error=str(exc))
+
+        assert record.id is not None
+        self.repository.update_raw_syslog_parse(
+            record.id,
+            outcome.status.value,
+            vendor,
+            outcome.error,
+        )
+
+        event_id: int | None = None
+        event_ts: datetime | None = None
+        if outcome.event is not None:
+            self._canonicalize_event_ap_identity(outcome.event)
+            event_id = self.repository.insert_normalized_event(outcome.event)
+            event_ts = outcome.event.ts
+            if outcome.event.ap_name:
+                self.repository.upsert_ap_metadata(
+                    APMetadata(
+                        ap_name=outcome.event.ap_name,
+                        vendor=outcome.event.vendor,
+                        ap_mac=outcome.event.ap_mac,
+                        mgmt_ip=record.sender_ip,
+                    )
+                )
+                if outcome.event.ap_mac and not self._looks_like_mac(outcome.event.ap_name):
+                    canonicalizer = getattr(self.repository, "canonicalize_ap_events", None)
+                    if callable(canonicalizer):
+                        canonicalizer(outcome.event.ap_mac, outcome.event.ap_name)
+
+        return {
+            "raw_event_id": record.id,
+            "normalized_event_id": event_id,
+            "normalized_event_ts": event_ts,
+            "vendor_detected": vendor,
+            "parse_status": outcome.status.value,
+            "event_type": outcome.event.event_type if outcome.event else None,
+            "parse_error": outcome.error,
+        }
+
+    def _canonicalize_event_ap_identity(self, event) -> None:
+        if not event.ap_mac:
+            return
+        if event.ap_name and not self._looks_like_mac(event.ap_name):
+            return
+        metadata = self.find_ap_metadata(event.ap_mac)
+        if metadata is None:
+            return
+        ap_name = metadata.get("ap_name")
+        if ap_name and not self._looks_like_mac(ap_name):
+            event.ap_name = ap_name
+
+    @staticmethod
+    def _looks_like_mac(value: str | None) -> bool:
+        if value is None:
+            return False
+        compact = "".join(ch for ch in value if ch.isalnum())
+        return len(compact) == 12 and all(ch in "0123456789abcdefABCDEF" for ch in compact)

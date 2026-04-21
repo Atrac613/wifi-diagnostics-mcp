@@ -10,6 +10,13 @@ from .storage import Repository
 
 
 class WiFiAnalytics:
+    _AUXILIARY_UNKNOWN_REASON_CODES = {
+        "mobile_station_not_found",
+    }
+    _AUXILIARY_UNKNOWN_REASON_PREFIXES = (
+        "safec_error:",
+    )
+
     def __init__(self, repository: Repository, config: AppConfig) -> None:
         self.repository = repository
         self.config = config
@@ -52,6 +59,7 @@ class WiFiAnalytics:
             limit=2000,
         )
         issue_events = self._issue_analysis_events(events)
+        drilldown_events = self._drilldown_visible_events(events)
         counts = Counter(event.event_type for event in issue_events)
         top_clients = self._counter_to_ranked(
             Counter(event.client_mac for event in issue_events if event.client_mac), "client_mac"
@@ -70,7 +78,7 @@ class WiFiAnalytics:
             "event_counts_by_type": dict(counts),
             "top_clients": top_clients[:10],
             "top_ssids": top_ssids[:10],
-            "latest_events": [self._event_brief(event) for event in issue_events[:10]],
+            "latest_events": [self._event_brief(event) for event in drilldown_events[:10]],
             "suspected_issues": self._suspected_issues(
                 counts,
                 total_events=len(issue_events),
@@ -202,6 +210,7 @@ class WiFiAnalytics:
         enriched: list[dict[str, Any]] = []
         for event in events[:limit]:
             payload = event.as_dict()
+            payload["ap_name"] = self._event_ap_name(event)
             if include_raw and event.raw_event_id is not None and event.raw_event_id in raw_records:
                 payload["raw_message"] = raw_records[event.raw_event_id].raw_message
             enriched.append(payload)
@@ -312,11 +321,11 @@ class WiFiAnalytics:
         metadata = getattr(self.repository, "find_ap_metadata", lambda _: None)(ap_name)
         if metadata is None:
             return {"display_name": ap_name, "names": (ap_name,), "ap_mac": None}
-        names = {ap_name, metadata.ap_name}
+        names = {ap_name, metadata.ap_name, metadata.mgmt_ip}
         if metadata.ap_mac:
             names.add(metadata.ap_mac)
         return {
-            "display_name": metadata.ap_name,
+            "display_name": self._display_ap_name(metadata),
             "names": tuple(sorted(name for name in names if name)),
             "ap_mac": metadata.ap_mac,
         }
@@ -365,14 +374,43 @@ class WiFiAnalytics:
         )
 
     def _issue_analysis_events(self, events: Iterable[NormalizedEvent]) -> list[NormalizedEvent]:
-        return [event for event in events if not self._exclude_from_health_score(event)]
+        return [event for event in events if not self._exclude_from_issue_ranking(event)]
+
+    def _drilldown_visible_events(self, events: Iterable[NormalizedEvent]) -> list[NormalizedEvent]:
+        return [event for event in events if not self._exclude_from_drilldown(event)]
+
+    @classmethod
+    def _exclude_from_health_score(cls, event: NormalizedEvent) -> bool:
+        return cls._is_noise_unknown(event) or cls._is_auxiliary_unknown(event)
+
+    @classmethod
+    def _exclude_from_issue_ranking(cls, event: NormalizedEvent) -> bool:
+        return cls._exclude_from_health_score(event)
+
+    @classmethod
+    def _exclude_from_drilldown(cls, event: NormalizedEvent) -> bool:
+        return cls._is_noise_unknown(event)
 
     @staticmethod
-    def _exclude_from_health_score(event: NormalizedEvent) -> bool:
+    def _is_noise_unknown(event: NormalizedEvent) -> bool:
         return (
             event.event_type == EventType.UNKNOWN_WIFI_EVENT.value
             and isinstance(event.reason_code, str)
             and event.reason_code.startswith("noise:")
+        )
+
+    @classmethod
+    def _is_auxiliary_unknown(cls, event: NormalizedEvent) -> bool:
+        return (
+            event.event_type == EventType.UNKNOWN_WIFI_EVENT.value
+            and isinstance(event.reason_code, str)
+            and (
+                event.reason_code in cls._AUXILIARY_UNKNOWN_REASON_CODES
+                or any(
+                    event.reason_code.startswith(prefix)
+                    for prefix in cls._AUXILIARY_UNKNOWN_REASON_PREFIXES
+                )
+            )
         )
 
     def _interpretation_hint(
@@ -465,12 +503,30 @@ class WiFiAnalytics:
             if event.ap_mac:
                 metadata = finder(event.ap_mac)
                 if metadata is not None:
-                    return metadata.ap_name
+                    return self._display_ap_name(metadata, fallback=event.ap_name or event.ap_mac)
             if event.ap_name:
                 metadata = finder(event.ap_name)
                 if metadata is not None:
-                    return metadata.ap_name
+                    return self._display_ap_name(metadata, fallback=event.ap_name or event.ap_mac)
         return event.ap_name or event.ap_mac
+
+    @classmethod
+    def _display_ap_name(cls, metadata: Any, fallback: str | None = None) -> str | None:
+        ap_name = getattr(metadata, "ap_name", None)
+        if ap_name and not cls._looks_like_mac(ap_name):
+            return ap_name
+        mgmt_ip = getattr(metadata, "mgmt_ip", None)
+        if mgmt_ip:
+            return mgmt_ip
+        ap_mac = getattr(metadata, "ap_mac", None)
+        return ap_name or ap_mac or fallback
+
+    @staticmethod
+    def _looks_like_mac(value: str | None) -> bool:
+        if value is None:
+            return False
+        compact = "".join(ch for ch in value if ch.isalnum())
+        return len(compact) == 12 and all(ch in "0123456789abcdefABCDEF" for ch in compact)
 
     @staticmethod
     def _counter_to_ranked(

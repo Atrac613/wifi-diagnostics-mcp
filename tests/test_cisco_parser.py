@@ -110,6 +110,30 @@ class CiscoParserTests(unittest.TestCase):
         self.assertEqual(outcome.event.reason_code, "max_eapol_key_retrans")
         self.assertEqual(outcome.event.severity, "error")
 
+    def test_mobility_express_invalid_replay_counter_is_auth_failure(self) -> None:
+        record = RawSyslogRecord(
+            id=51,
+            received_at=utc_now(),
+            sender_ip="198.51.100.28",
+            raw_message=(
+                "<131>Cisco-00f8.2c26.6580: *Dot1x_NW_MsgTask_0: Apr 21 09:53:13.456: "
+                "%DOT1X-3-INVALID_REPLAY_CTR: 1x_eapkey.c:458 Invalid replay counter "
+                "from client e2:c9:fa:b6:ff:47 - got 00 00 00 00 00 00 00 02, expected "
+                "00 00 00 00 00 00 00 03"
+            ),
+            vendor_guess="cisco",
+            parse_status="received",
+        )
+        outcome = self.parser.parse(record)
+        self.assertEqual(outcome.status.value, "parsed")
+        assert outcome.event is not None
+        self.assertEqual(outcome.event.event_type, EventType.AUTH_FAILURE.value)
+        self.assertEqual(outcome.event.ap_name, "00:f8:2c:26:65:80")
+        self.assertEqual(outcome.event.ap_mac, "00:f8:2c:26:65:80")
+        self.assertEqual(outcome.event.client_mac, "e2:c9:fa:b6:ff:47")
+        self.assertEqual(outcome.event.reason_code, "invalid_replay_counter")
+        self.assertEqual(outcome.event.severity, "error")
+
     def test_osapi_events_are_tagged_as_noise_unknowns(self) -> None:
         record = RawSyslogRecord(
             id=6,
@@ -220,6 +244,325 @@ class CiscoParserTests(unittest.TestCase):
         self.assertEqual(outcome.event.reason_code, "sending_station_has_left_the_bss")
         self.assertEqual(outcome.event.severity, "warning")
 
+    def test_mobility_express_disassoc_without_reason_is_deauth(self) -> None:
+        record = RawSyslogRecord(
+            id=58,
+            received_at=utc_now(),
+            sender_ip="198.51.100.35",
+            raw_message=(
+                "<6>13319: AP:00f6.6353.1418: *Apr 20 23:00:25.871: "
+                "%DOT11-6-DISASSOC: Interface Dot11Radio0, Deauthenticating Station "
+                "7c87.ce81.2290"
+            ),
+            vendor_guess="cisco",
+            parse_status="received",
+        )
+        outcome = self.parser.parse(record)
+        self.assertEqual(outcome.status.value, "parsed")
+        assert outcome.event is not None
+        self.assertEqual(outcome.event.event_type, EventType.CLIENT_DEAUTHENTICATED.value)
+        self.assertEqual(outcome.event.ap_name, "00:f6:63:53:14:18")
+        self.assertEqual(outcome.event.ap_mac, "00:f6:63:53:14:18")
+        self.assertEqual(outcome.event.client_mac, "7c:87:ce:81:22:90")
+        self.assertEqual(outcome.event.radio, "Dot11Radio0")
+        self.assertIsNone(outcome.event.reason_code)
+        self.assertEqual(outcome.event.severity, "warning")
+
+    def test_expected_radio_reset_is_normalized_as_ap_down(self) -> None:
+        record = RawSyslogRecord(
+            id=52,
+            received_at=utc_now(),
+            sender_ip="198.51.100.29",
+            raw_message=(
+                "<5>13352: AP:00f6.6353.1418: *Apr 21 00:50:57.427: "
+                "%DOT11-5-EXPECTED_RADIO_RESET: Restarting Radio interface Dot11Radio1 "
+                "due to the reason code 56"
+            ),
+            vendor_guess="cisco",
+            parse_status="received",
+        )
+        outcome = self.parser.parse(record)
+        self.assertEqual(outcome.status.value, "parsed")
+        assert outcome.event is not None
+        self.assertEqual(outcome.event.event_type, EventType.AP_DOWN.value)
+        self.assertEqual(outcome.event.ap_name, "00:f6:63:53:14:18")
+        self.assertEqual(outcome.event.ap_mac, "00:f6:63:53:14:18")
+        self.assertEqual(outcome.event.radio, "Dot11Radio1")
+        self.assertEqual(outcome.event.reason_code, "radio_reset:56")
+        self.assertEqual(outcome.event.severity, "warning")
+
+    def test_radio_link_updown_is_normalized(self) -> None:
+        down_record = RawSyslogRecord(
+            id=53,
+            received_at=utc_now(),
+            sender_ip="198.51.100.30",
+            raw_message=(
+                "<6>13353: AP:00f6.6353.1418: *Apr 21 00:50:57.443: "
+                "%LINK-6-UPDOWN: Interface Dot11Radio1, changed state to down"
+            ),
+            vendor_guess="cisco",
+            parse_status="received",
+        )
+        down_outcome = self.parser.parse(down_record)
+        self.assertEqual(down_outcome.status.value, "parsed")
+        assert down_outcome.event is not None
+        self.assertEqual(down_outcome.event.event_type, EventType.AP_DOWN.value)
+        self.assertEqual(down_outcome.event.ap_name, "00:f6:63:53:14:18")
+        self.assertEqual(down_outcome.event.radio, "Dot11Radio1")
+        self.assertEqual(down_outcome.event.reason_code, "radio_state:down")
+        self.assertEqual(down_outcome.event.severity, "warning")
+
+        up_record = RawSyslogRecord(
+            id=54,
+            received_at=utc_now(),
+            sender_ip="198.51.100.31",
+            raw_message=(
+                "<5>13357: AP:00f6.6353.1418: *Apr 21 00:50:59.487: "
+                "%LINEPROTO-5-UPDOWN: Line protocol on Interface Dot11Radio1, changed state to up"
+            ),
+            vendor_guess="cisco",
+            parse_status="received",
+        )
+        up_outcome = self.parser.parse(up_record)
+        self.assertEqual(up_outcome.status.value, "parsed")
+        assert up_outcome.event is not None
+        self.assertEqual(up_outcome.event.event_type, EventType.AP_UP.value)
+        self.assertEqual(up_outcome.event.ap_name, "00:f6:63:53:14:18")
+        self.assertEqual(up_outcome.event.radio, "Dot11Radio1")
+        self.assertEqual(up_outcome.event.reason_code, "radio_state:up")
+        self.assertEqual(up_outcome.event.severity, "info")
+
+    def test_radio_link_reset_is_normalized_as_ap_down(self) -> None:
+        record = RawSyslogRecord(
+            id=55,
+            received_at=utc_now(),
+            sender_ip="198.51.100.32",
+            raw_message=(
+                "<5>13354: AP:00f6.6353.1418: *Apr 21 00:50:57.451: "
+                "%LINK-5-CHANGED: Interface Dot11Radio1, changed state to reset"
+            ),
+            vendor_guess="cisco",
+            parse_status="received",
+        )
+        outcome = self.parser.parse(record)
+        self.assertEqual(outcome.status.value, "parsed")
+        assert outcome.event is not None
+        self.assertEqual(outcome.event.event_type, EventType.AP_DOWN.value)
+        self.assertEqual(outcome.event.ap_name, "00:f6:63:53:14:18")
+        self.assertEqual(outcome.event.radio, "Dot11Radio1")
+        self.assertEqual(outcome.event.reason_code, "radio_state:reset")
+        self.assertEqual(outcome.event.severity, "warning")
+
+    def test_log_q_ind_assocreq_is_normalized_as_auth_failure(self) -> None:
+        record = RawSyslogRecord(
+            id=59,
+            received_at=utc_now(),
+            sender_ip="198.51.100.36",
+            raw_message=(
+                "<132>Cisco-00f8.2c26.6580: *apfMsConnTask_0: Apr 21 08:00:32.860: "
+                "%LOG-4-Q_IND: apf_80211.c:11180 Failed to process an association request "
+                "from 50:14:79:21:7e:7c. WLAN:2, SSID:ChaCha. "
+                "Max Sta - Load balance decision failure."
+            ),
+            vendor_guess="cisco",
+            parse_status="received",
+        )
+        outcome = self.parser.parse(record)
+        self.assertEqual(outcome.status.value, "parsed")
+        assert outcome.event is not None
+        self.assertEqual(outcome.event.event_type, EventType.AUTH_FAILURE.value)
+        self.assertEqual(outcome.event.ap_name, "00:f8:2c:26:65:80")
+        self.assertEqual(outcome.event.ap_mac, "00:f8:2c:26:65:80")
+        self.assertEqual(outcome.event.client_mac, "50:14:79:21:7e:7c")
+        self.assertEqual(outcome.event.ssid, "ChaCha")
+        self.assertEqual(
+            outcome.event.reason_code,
+            "assocreq_proc_failed:max_sta_load_balance_decision_failure",
+        )
+        self.assertEqual(outcome.event.severity, "error")
+
+    def test_log_q_ind_default_cipher_is_tagged_as_noise_unknown(self) -> None:
+        record = RawSyslogRecord(
+            id=61,
+            received_at=utc_now(),
+            sender_ip="198.51.100.38",
+            raw_message=(
+                "<134>Cisco-00f8.2c26.6580: *spamApTask0: Apr 21 10:15:39.358: "
+                "%LOG-6-Q_IND: apf_rsn_utils.c:3136 Using default settings for Group "
+                "Management Cipher Suite for mobile 50:14:79:c8:69:55"
+            ),
+            vendor_guess="cisco",
+            parse_status="received",
+        )
+        outcome = self.parser.parse(record)
+        self.assertEqual(outcome.status.value, "unknown_event")
+        assert outcome.event is not None
+        self.assertEqual(outcome.event.event_type, EventType.UNKNOWN_WIFI_EVENT.value)
+        self.assertEqual(outcome.event.ap_name, "00:f8:2c:26:65:80")
+        self.assertEqual(outcome.event.ap_mac, "00:f8:2c:26:65:80")
+        self.assertEqual(outcome.event.client_mac, "50:14:79:c8:69:55")
+        self.assertEqual(outcome.event.reason_code, "noise:apf_6_use_default_cipher_suite")
+        self.assertEqual(outcome.event.severity, "debug")
+
+    def test_assoc_req_failed_radio_not_enabled_is_auth_failure(self) -> None:
+        record = RawSyslogRecord(
+            id=62,
+            received_at=utc_now(),
+            sender_ip="198.51.100.39",
+            raw_message=(
+                "<131>Cisco-00f8.2c26.6580: *apfMsConnTask_0: Apr 21 08:00:29.931: "
+                "%APF-3-ASSOC_REQ_FAILED: apf_80211.c:10492 Ignoring 802.11 assoc request "
+                "from mobile 7c:87:ce:81:22:90 Since Dot11Radio 0 is not Enabled for "
+                "AP:AP00f6.6353.1418 MAC:00:81:c4:f6:42:10"
+            ),
+            vendor_guess="cisco",
+            parse_status="received",
+        )
+        outcome = self.parser.parse(record)
+        self.assertEqual(outcome.status.value, "parsed")
+        assert outcome.event is not None
+        self.assertEqual(outcome.event.event_type, EventType.AUTH_FAILURE.value)
+        self.assertEqual(outcome.event.ap_name, "AP00f6.6353.1418")
+        self.assertEqual(outcome.event.ap_mac, "00:81:c4:f6:42:10")
+        self.assertEqual(outcome.event.client_mac, "7c:87:ce:81:22:90")
+        self.assertEqual(outcome.event.radio, "Dot11Radio0")
+        self.assertEqual(outcome.event.reason_code, "assoc_req_failed:radio_not_enabled")
+        self.assertEqual(outcome.event.severity, "error")
+
+    def test_mobile_station_not_found_is_low_priority_unknown(self) -> None:
+        record = RawSyslogRecord(
+            id=64,
+            received_at=utc_now(),
+            sender_ip="198.51.100.41",
+            raw_message=(
+                "<132>Cisco-00f8.2c26.6580: *spamApTask0: Apr 21 10:15:39.358: "
+                "%APF-4-MOBILESTATION_NOT_FOUND: apf_api.c:57734 Could not find the mobile "
+                "50:14:79:c8:69:55 in internal database"
+            ),
+            vendor_guess="cisco",
+            parse_status="received",
+        )
+        outcome = self.parser.parse(record)
+        self.assertEqual(outcome.status.value, "unknown_event")
+        assert outcome.event is not None
+        self.assertEqual(outcome.event.event_type, EventType.UNKNOWN_WIFI_EVENT.value)
+        self.assertEqual(outcome.event.ap_name, "00:f8:2c:26:65:80")
+        self.assertEqual(outcome.event.ap_mac, "00:f8:2c:26:65:80")
+        self.assertEqual(outcome.event.client_mac, "50:14:79:c8:69:55")
+        self.assertEqual(outcome.event.reason_code, "mobile_station_not_found")
+        self.assertEqual(outcome.event.severity, "info")
+
+    def test_safec_error_is_auxiliary_unknown(self) -> None:
+        record = RawSyslogRecord(
+            id=65,
+            received_at=utc_now(),
+            sender_ip="198.51.100.42",
+            raw_message=(
+                "<131>Cisco-00f8.2c26.6580: *apfMsConnTask_0: Apr 21 08:12:36.103: "
+                "%SAFEC-3-SAFEC_ERROR: safecWrapper.c:57 DATA INCONSISTENCY: (22) "
+                "memcpy_s: n exceeds dmax"
+            ),
+            vendor_guess="cisco",
+            parse_status="received",
+        )
+        outcome = self.parser.parse(record)
+        self.assertEqual(outcome.status.value, "unknown_event")
+        assert outcome.event is not None
+        self.assertEqual(outcome.event.event_type, EventType.UNKNOWN_WIFI_EVENT.value)
+        self.assertEqual(outcome.event.ap_name, "00:f8:2c:26:65:80")
+        self.assertEqual(outcome.event.ap_mac, "00:f8:2c:26:65:80")
+        self.assertEqual(outcome.event.reason_code, "safec_error:memcpy_s_n_exceeds_dmax")
+        self.assertEqual(outcome.event.severity, "warning")
+
+    def test_dot1x_11r_forced_auth_is_normalized_as_roam_success(self) -> None:
+        record = RawSyslogRecord(
+            id=60,
+            received_at=utc_now(),
+            sender_ip="198.51.100.37",
+            raw_message=(
+                "<134>Cisco-00f8.2c26.6580: *Dot1x_NW_MsgTask_0: Apr 21 08:12:36.110: "
+                "%DOT1X-6-11R_FORCED_AUTH: 1x_auth_pae.c:7564 FT Auth successful. "
+                "Moving client 12:96:21:e3:ff:b5 to forced auth state"
+            ),
+            vendor_guess="cisco",
+            parse_status="received",
+        )
+        outcome = self.parser.parse(record)
+        self.assertEqual(outcome.status.value, "parsed")
+        assert outcome.event is not None
+        self.assertEqual(outcome.event.event_type, EventType.ROAM_SUCCESS.value)
+        self.assertEqual(outcome.event.ap_name, "00:f8:2c:26:65:80")
+        self.assertEqual(outcome.event.ap_mac, "00:f8:2c:26:65:80")
+        self.assertEqual(outcome.event.client_mac, "12:96:21:e3:ff:b5")
+        self.assertEqual(outcome.event.reason_code, "ft_auth_success")
+        self.assertEqual(outcome.event.severity, "info")
+
+    def test_admin_auth_success_is_tagged_as_noise_unknown(self) -> None:
+        record = RawSyslogRecord(
+            id=63,
+            received_at=utc_now(),
+            sender_ip="198.51.100.40",
+            raw_message=(
+                "<133>Cisco-00f8.2c26.6580: *emWeb: Apr 21 09:47:44.436: "
+                "%AAA-5-AAA_AUTH_ADMIN_USER: aaa.c:3334 Authentication succeeded for "
+                "admin user 'atrac' on 91.100.168.192"
+            ),
+            vendor_guess="cisco",
+            parse_status="received",
+        )
+        outcome = self.parser.parse(record)
+        self.assertEqual(outcome.status.value, "unknown_event")
+        assert outcome.event is not None
+        self.assertEqual(outcome.event.event_type, EventType.UNKNOWN_WIFI_EVENT.value)
+        self.assertEqual(outcome.event.ap_name, "00:f8:2c:26:65:80")
+        self.assertEqual(outcome.event.ap_mac, "00:f8:2c:26:65:80")
+        self.assertEqual(outcome.event.reason_code, "noise:aaa_auth_admin_user")
+        self.assertEqual(outcome.event.severity, "debug")
+
+    def test_cleanair_enabled_is_tagged_as_noise_unknown(self) -> None:
+        record = RawSyslogRecord(
+            id=56,
+            received_at=utc_now(),
+            sender_ip="198.51.100.33",
+            raw_message=(
+                "<6>13359: AP:00f6.6353.1418: *Apr 21 00:51:26.967: "
+                "%CLEANAIR-6-STATE: Slot 1 enabled"
+            ),
+            vendor_guess="cisco",
+            parse_status="received",
+        )
+        outcome = self.parser.parse(record)
+        self.assertEqual(outcome.status.value, "unknown_event")
+        assert outcome.event is not None
+        self.assertEqual(outcome.event.event_type, EventType.UNKNOWN_WIFI_EVENT.value)
+        self.assertEqual(outcome.event.ap_name, "00:f6:63:53:14:18")
+        self.assertEqual(outcome.event.ap_mac, "00:f6:63:53:14:18")
+        self.assertEqual(outcome.event.radio, "Slot1")
+        self.assertEqual(outcome.event.reason_code, "noise:cleanair_state_slot_1_enabled")
+        self.assertEqual(outcome.event.severity, "debug")
+
+    def test_cleanair_down_is_preserved_as_non_noise_unknown(self) -> None:
+        record = RawSyslogRecord(
+            id=57,
+            received_at=utc_now(),
+            sender_ip="198.51.100.34",
+            raw_message=(
+                "<6>13358: AP:00f6.6353.1418: *Apr 21 00:51:10.199: "
+                "%CLEANAIR-6-STATE: Slot 1 down"
+            ),
+            vendor_guess="cisco",
+            parse_status="received",
+        )
+        outcome = self.parser.parse(record)
+        self.assertEqual(outcome.status.value, "unknown_event")
+        assert outcome.event is not None
+        self.assertEqual(outcome.event.event_type, EventType.UNKNOWN_WIFI_EVENT.value)
+        self.assertEqual(outcome.event.ap_name, "00:f6:63:53:14:18")
+        self.assertEqual(outcome.event.ap_mac, "00:f6:63:53:14:18")
+        self.assertEqual(outcome.event.radio, "Slot1")
+        self.assertEqual(outcome.event.reason_code, "cleanair_state_slot_1_down")
+        self.assertEqual(outcome.event.severity, "warning")
+
     def test_timestamp_uses_nearest_year_with_configured_timezone(self) -> None:
         parser = CiscoParser(syslog_timestamp_tzinfo=timezone(timedelta(hours=9)))
         record = RawSyslogRecord(
@@ -264,6 +607,36 @@ class CiscoParserTests(unittest.TestCase):
                 assert metadata is not None
                 self.assertEqual(metadata["ap_name"], "AP-Office")
                 self.assertEqual(metadata["ap_mac"], "00:f8:2c:26:65:80")
+            finally:
+                repository.close()
+
+    def test_ingest_uses_friendly_ap_name_when_metadata_exists(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "wifi.db"
+            repository = SQLiteRepository(db_path)
+            repository.initialize()
+            service = WiFiDiagnosticsService(repository, AppConfig(db_path=db_path))
+            try:
+                service.repository.upsert_ap_metadata(
+                    APMetadata(
+                        ap_name="AP-Office",
+                        vendor="cisco",
+                        ap_mac="00:f8:2c:26:65:80",
+                        mgmt_ip="198.51.100.21",
+                    )
+                )
+                service.ingest_syslog(
+                    self.fixture_lines[10],
+                    sender_ip="198.51.100.21",
+                    vendor_override="cisco",
+                )
+                result = service.search_wifi_events(
+                    vendor="cisco",
+                    client_mac="ae:b0:9e:57:34:8c",
+                    minutes=24 * 60,
+                    limit=5,
+                )
+                self.assertEqual(result["matched_events"][0]["ap_name"], "AP-Office")
             finally:
                 repository.close()
 
