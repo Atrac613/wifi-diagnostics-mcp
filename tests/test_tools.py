@@ -122,7 +122,7 @@ class MCPDefinitionsTests(unittest.TestCase):
             limit=1,
             vendor="cisco",
             client_mac="ae:b0:9e:57:34:8c",
-            minutes=24 * 60,
+            minutes=366 * 24 * 60,
         )
         self.assertTrue(default_payload["matched_events"])
         self.assertNotIn("raw_message", default_payload["matched_events"][0])
@@ -133,7 +133,7 @@ class MCPDefinitionsTests(unittest.TestCase):
             include_raw=True,
             vendor="cisco",
             client_mac="ae:b0:9e:57:34:8c",
-            minutes=24 * 60,
+            minutes=366 * 24 * 60,
         )
         self.assertIn("raw_message", with_raw["matched_events"][0])
 
@@ -150,7 +150,7 @@ class MCPDefinitionsTests(unittest.TestCase):
             limit=1,
             vendor="cisco",
             client_mac="ae:b0:9e:57:34:8c",
-            minutes=24 * 60,
+            minutes=366 * 24 * 60,
         )
         self.assertEqual(payload["matched_events"][0]["ap_name"], "198.51.100.200")
 

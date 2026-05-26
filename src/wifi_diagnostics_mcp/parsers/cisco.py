@@ -8,7 +8,7 @@ from .base import BaseParser, normalize_mac
 
 class CiscoParser(BaseParser):
     vendor_name = Vendor.CISCO.value
-    parser_version = "cisco-regex-1.9"
+    parser_version = "cisco-regex-1.12"
 
     _assoc = re.compile(
         r'AP "(?P<ap_name>[^"]+)".*?Interface (?P<radio>[A-Za-z0-9/]+), '
@@ -49,6 +49,35 @@ class CiscoParser(BaseParser):
         r"%DOT1X-3-INVALID_REPLAY_CTR:.*?client\s+"
         r"(?P<client_mac>(?:[0-9A-Fa-f]{4}\.){2}[0-9A-Fa-f]{4}|(?:[0-9A-Fa-f]{2}[:.-]){5}[0-9A-Fa-f]{2})"
     )
+    _mobility_express_dot1x_auth_failure = re.compile(
+        r"(?:Cisco-|AP:)(?P<ap_mac>(?:[0-9A-Fa-f]{4}\.){2}[0-9A-Fa-f]{4}).*?"
+        r"%(?P<mnemonic>DOT1X-4-MAX_EAP_RETRIES|DOT1X-3-INVALID_WPA_KEY_STATE|"
+        r"APF-3-PREAUTH_FAILURE|DOT11-4-CCMP_REPLAY):.*?(?:client|Client)\s*"
+        r"(?P<client_mac>(?:[0-9A-Fa-f]{4}\.){2}[0-9A-Fa-f]{4}|(?:[0-9A-Fa-f]{2}[:.-]){5}[0-9A-Fa-f]{2})"
+    )
+    _mobile_excluded = re.compile(
+        r"(?:Cisco-|AP:)(?P<ap_mac>(?:[0-9A-Fa-f]{4}\.){2}[0-9A-Fa-f]{4}).*?"
+        r"%APF-6-MOBILE_EXCLUDED:.*?Excluded the mobile\s+"
+        r"(?P<client_mac>(?:[0-9A-Fa-f]{4}\.){2}[0-9A-Fa-f]{4}|(?:[0-9A-Fa-f]{2}[:.-]){5}[0-9A-Fa-f]{2})"
+        r"(?:\s+Reason:\s+\"(?P<reason>[^\"]+)\")?"
+    )
+    _identity_theft_ip_registration_failed = re.compile(
+        r"(?:Cisco-|AP:)(?P<ap_mac>(?:[0-9A-Fa-f]{4}\.){2}[0-9A-Fa-f]{4}).*?"
+        r"%APF-4-REGISTER_IPADD_ON_MSCB_FAILED:.*?Identity theft alert.*?address:\s*"
+        r"(?P<client_mac>(?:[0-9A-Fa-f]{4}\.){2}[0-9A-Fa-f]{4}|(?:[0-9A-Fa-f]{2}[:.-]){5}[0-9A-Fa-f]{2})"
+    )
+    _capwap_dtls_closed = re.compile(
+        r"(?:Cisco-|AP:)(?P<controller_ap_mac>(?:[0-9A-Fa-f]{4}\.){2}[0-9A-Fa-f]{4}).*?"
+        r"%CAPWAP-3-DTLS_CLOSED_ERR:.*?"
+        r"(?P<ap_mac>(?:[0-9A-Fa-f]{4}\.){2}[0-9A-Fa-f]{4}|(?:[0-9A-Fa-f]{2}[:.-]){5}[0-9A-Fa-f]{2})"
+        r":\s+DTLS connection closed.*?(?P<reason>Echo Timer Expiry)"
+    )
+    _lwapp_ap_deleted = re.compile(
+        r"(?:Cisco-|AP:)(?P<controller_ap_mac>(?:[0-9A-Fa-f]{4}\.){2}[0-9A-Fa-f]{4}).*?"
+        r"%LWAPP-3-AP_DEL:.*?"
+        r"(?P<ap_mac>(?:[0-9A-Fa-f]{4}\.){2}[0-9A-Fa-f]{4}|(?:[0-9A-Fa-f]{2}[:.-]){5}[0-9A-Fa-f]{2})"
+        r":\s+Entry deleted for AP:.*?reason\s+:\s+(?P<reason>Echo Timer Expiry)"
+    )
     _radio_reset = re.compile(
         r"AP:(?P<ap_mac>(?:[0-9A-Fa-f]{4}\.){2}[0-9A-Fa-f]{4}).*?"
         r"%DOT11-5-EXPECTED_RADIO_RESET:\s+Restarting Radio interface\s+"
@@ -74,6 +103,10 @@ class CiscoParser(BaseParser):
     _radius_override_disabled = re.compile(
         r"(?:Cisco-|AP:)(?P<ap_mac>(?:[0-9A-Fa-f]{4}\.){2}[0-9A-Fa-f]{4}).*?"
         r"%(?P<mnemonic>APF-6-RADIUS_OVERRIDE_DISABLED):"
+    )
+    _log_q_ind_radius_override_disabled = re.compile(
+        r"(?:Cisco-|AP:)(?P<ap_mac>(?:[0-9A-Fa-f]{4}\.){2}[0-9A-Fa-f]{4}).*?"
+        r"%LOG-6-Q_IND:.*?Radius overrides disabled, ignoring source\s+\d+"
     )
     _use_default_cipher_suite = re.compile(
         r"(?:Cisco-|AP:)(?P<ap_mac>(?:[0-9A-Fa-f]{4}\.){2}[0-9A-Fa-f]{4}).*?"
@@ -110,6 +143,29 @@ class CiscoParser(BaseParser):
         r"%SAFEC-3-SAFEC_ERROR:.*?DATA INCONSISTENCY:\s+\(\d+\)\s+"
         r"(?P<operation>[A-Za-z0-9_]+):\s+(?P<detail>.+)$"
     )
+    _wme_addts_issue = re.compile(
+        r"(?:Cisco-|AP:)(?P<ap_mac>(?:[0-9A-Fa-f]{4}\.){2}[0-9A-Fa-f]{4}).*?"
+        r"%(?P<mnemonic>APF-6-PROCESS_WME_ADDTS_REQ_FAILED|APF-6-NULL_DATA_IN_ADDTS_REQ):.*?"
+        r"(?:STA\.STA:|STA\s+)"
+        r"(?P<client_mac>(?:[0-9A-Fa-f]{4}\.){2}[0-9A-Fa-f]{4}|(?:[0-9A-Fa-f]{2}[:.-]){5}[0-9A-Fa-f]{2})"
+    )
+    _client_state_issue = re.compile(
+        r"(?:Cisco-|AP:)(?P<ap_mac>(?:[0-9A-Fa-f]{4}\.){2}[0-9A-Fa-f]{4}).*?"
+        r"%(?P<mnemonic>APF-4-RCV_INVALID_ACTION_CODE|DOT1X-3-CLIENT_NOT_FOUND):.*?"
+        r"(?:mobile station|client)\s+"
+        r"(?P<client_mac>(?:[0-9A-Fa-f]{4}\.){2}[0-9A-Fa-f]{4}|(?:[0-9A-Fa-f]{2}[:.-]){5}[0-9A-Fa-f]{2})"
+    )
+    _aid_stale_station = re.compile(
+        r"(?:Cisco-|AP:)(?P<controller_ap_mac>(?:[0-9A-Fa-f]{4}\.){2}[0-9A-Fa-f]{4}).*?"
+        r"%APF-6-AID_STALE_STA:.*?Found invalid client:\s+"
+        r"(?P<client_mac>(?:[0-9A-Fa-f]{4}\.){2}[0-9A-Fa-f]{4}|(?:[0-9A-Fa-f]{2}[:.-]){5}[0-9A-Fa-f]{2})\s+"
+        r"on AP:\s+(?P<ap_mac>(?:[0-9A-Fa-f]{4}\.){2}[0-9A-Fa-f]{4}|(?:[0-9A-Fa-f]{2}[:.-]){5}[0-9A-Fa-f]{2})"
+    )
+    _rrm_missing_ap = re.compile(
+        r"(?:Cisco-|AP:)(?P<controller_ap_mac>(?:[0-9A-Fa-f]{4}\.){2}[0-9A-Fa-f]{4}).*?"
+        r"%(?P<mnemonic>LOG-3-Q_IND|RRM-3-RRM_LOGMSG):.*?Unable to find AP\s+"
+        r"(?P<ap_mac>(?:[0-9A-Fa-f]{4}\.){2}[0-9A-Fa-f]{4}|(?:[0-9A-Fa-f]{2}[:.-]){5}[0-9A-Fa-f]{2})"
+    )
     _log_q_ind_assocreq = re.compile(
         r"(?:Cisco-|AP:)(?P<ap_mac>(?:[0-9A-Fa-f]{4}\.){2}[0-9A-Fa-f]{4}).*?"
         r"%LOG-[46]-Q_IND:.*?association request from\s+"
@@ -120,6 +176,24 @@ class CiscoParser(BaseParser):
     _aaa_auth_admin_user = re.compile(
         r"(?:Cisco-|AP:)(?P<ap_mac>(?:[0-9A-Fa-f]{4}\.){2}[0-9A-Fa-f]{4}).*?"
         r"%(?P<mnemonic>AAA-5-AAA_AUTH_ADMIN_USER):"
+    )
+    _mm_member_sanity_zero_node = re.compile(
+        r"(?:Cisco-|AP:)(?P<ap_mac>(?:[0-9A-Fa-f]{4}\.){2}[0-9A-Fa-f]{4}).*?"
+        r"%(?P<mnemonic>MM-6-MEMBER_CFGSANITY_ZERONODE):.*?no further action needed"
+    )
+    _controller_startup_noise = re.compile(
+        r"(?:Cisco-|AP:)(?P<ap_mac>(?:[0-9A-Fa-f]{4}\.){2}[0-9A-Fa-f]{4}).*?"
+        r"%(?P<mnemonic>SOCKET_TASK-6-STARTING|DC-6-DC_INIT_INFO|AAA-6-FUNC_RUNNING|"
+        r"AAA-6-DB_ADD_USER|AAA-6-CREATE_AVL_TREE|CCX-6-MSGTAG[0-9]+|"
+        r"SSHPM-6-CERT_COMP_MODE_INFO|SNTP-7-SET_HW_TIME|SYSTEM-6-MBUF_ALREADY_FREE|"
+        r"APF-4-DOT1P_TAGS|APF-6-SUP_MOBILE_CLIENTS|APF-6-AIRSPC_WARP_KCID|"
+        r"APF-6-WARP_ENABLE|DTLS-5-ESTABLISHED_TO_PEER):"
+    )
+    _control_plane_issue = re.compile(
+        r"(?:Cisco-|AP:)(?P<ap_mac>(?:[0-9A-Fa-f]{4}\.){2}[0-9A-Fa-f]{4}).*?"
+        r"%(?P<mnemonic>LWAPP-3-WLAN_ERR2|CAPWAP-4-INVALID_STATE_EVENT|"
+        r"MM-6-INET_MEMBER_ADD_FAILED|CNFGR-3-INV_COMP_ID|"
+        r"LWAPP-3-MAX_LRAD_CNT_UPDATED|APF-3-INVALID_MCAST_MODE_ADDR):"
     )
     _dot1x_11r_forced_auth = re.compile(
         r"(?:Cisco-|AP:)(?P<ap_mac>(?:[0-9A-Fa-f]{4}\.){2}[0-9A-Fa-f]{4}).*?"
@@ -169,20 +243,39 @@ class CiscoParser(BaseParser):
             (self._auth_failure, self._build_auth_failure),
             (self._mobility_express_auth_failure, self._build_mobility_express_auth_failure),
             (self._mobility_express_invalid_replay_ctr, self._build_mobility_express_invalid_replay_ctr),
+            (self._mobility_express_dot1x_auth_failure, self._build_mobility_express_dot1x_auth_failure),
+            (self._mobile_excluded, self._build_mobile_excluded),
+            (
+                self._identity_theft_ip_registration_failed,
+                self._build_identity_theft_ip_registration_failed,
+            ),
+            (self._capwap_dtls_closed, self._build_capwap_dtls_closed),
+            (self._lwapp_ap_deleted, self._build_lwapp_ap_deleted),
             (self._radio_reset, self._build_radio_reset),
             (self._radio_link_updown, self._build_radio_link_updown),
             (self._radio_link_changed, self._build_radio_link_changed),
             (self._cleanair_state, self._build_cleanair_state),
             (self._osapi_noise, self._build_osapi_noise),
             (self._radius_override_disabled, self._build_radius_override_disabled),
+            (
+                self._log_q_ind_radius_override_disabled,
+                self._build_log_q_ind_radius_override_disabled,
+            ),
             (self._use_default_cipher_suite, self._build_use_default_cipher_suite),
             (self._log_q_ind_default_cipher, self._build_log_q_ind_default_cipher),
             (self._assocreq_proc_failed, self._build_assocreq_proc_failed),
             (self._assoc_req_failed_radio_disabled, self._build_assoc_req_failed_radio_disabled),
             (self._mobile_station_not_found, self._build_mobile_station_not_found),
             (self._safec_error, self._build_safec_error),
+            (self._wme_addts_issue, self._build_wme_addts_issue),
+            (self._client_state_issue, self._build_client_state_issue),
+            (self._aid_stale_station, self._build_aid_stale_station),
+            (self._rrm_missing_ap, self._build_rrm_missing_ap),
             (self._log_q_ind_assocreq, self._build_log_q_ind_assocreq),
             (self._aaa_auth_admin_user, self._build_aaa_auth_admin_user),
+            (self._mm_member_sanity_zero_node, self._build_mm_member_sanity_zero_node),
+            (self._controller_startup_noise, self._build_controller_startup_noise),
+            (self._control_plane_issue, self._build_control_plane_issue),
             (self._dot1x_11r_forced_auth, self._build_dot1x_11r_forced_auth),
             (self._auth_success, self._build_auth_success),
             (self._roam_failure, self._build_roam_failure),
@@ -247,6 +340,8 @@ class CiscoParser(BaseParser):
         event_type = EventType.CLIENT_DEAUTHENTICATED
         if reason == "sending_station_has_left_the_bss":
             event_type = EventType.CLIENT_DISASSOCIATED
+        elif reason is None:
+            reason = "deauthenticating_station"
         return self.make_event(
             record,
             event_type=event_type,
@@ -309,6 +404,94 @@ class CiscoParser(BaseParser):
             client_mac=match.group("client_mac"),
             reason_code="invalid_replay_counter",
             severity=Severity.ERROR,
+        )
+
+    def _build_mobility_express_dot1x_auth_failure(self, record: RawSyslogRecord, match: re.Match[str]):
+        ap_mac = normalize_mac(match.group("ap_mac"))
+        reason_by_mnemonic = {
+            "DOT1X-4-MAX_EAP_RETRIES": "max_eap_retries",
+            "DOT1X-3-INVALID_WPA_KEY_STATE": "invalid_wpa_key_state",
+            "APF-3-PREAUTH_FAILURE": "preauth_failure",
+            "DOT11-4-CCMP_REPLAY": "ccmp_replay",
+        }
+        reason_code = reason_by_mnemonic[match.group("mnemonic")]
+        return self.make_event(
+            record,
+            event_type=EventType.AUTH_FAILURE,
+            device_id=ap_mac or record.sender_ip,
+            ap_name=self._mobility_express_ap_name(record, ap_mac),
+            ap_mac=ap_mac,
+            client_mac=match.group("client_mac"),
+            reason_code=reason_code,
+            severity=Severity.ERROR,
+        )
+
+    def _build_mobile_excluded(self, record: RawSyslogRecord, match: re.Match[str]):
+        ap_mac = normalize_mac(match.group("ap_mac"))
+        reason = self._slug_reason(match.group("reason"))
+        reason_code = "mobile_excluded"
+        if reason:
+            reason_code = f"{reason_code}:{reason}"
+        return self.make_event(
+            record,
+            event_type=EventType.AUTH_FAILURE,
+            device_id=ap_mac or record.sender_ip,
+            ap_name=self._mobility_express_ap_name(record, ap_mac),
+            ap_mac=ap_mac,
+            client_mac=match.group("client_mac"),
+            reason_code=reason_code,
+            severity=Severity.ERROR,
+        )
+
+    def _build_identity_theft_ip_registration_failed(
+        self,
+        record: RawSyslogRecord,
+        match: re.Match[str],
+    ):
+        ap_mac = normalize_mac(match.group("ap_mac"))
+        return self.make_event(
+            record,
+            event_type=EventType.AUTH_FAILURE,
+            device_id=ap_mac or record.sender_ip,
+            ap_name=self._mobility_express_ap_name(record, ap_mac),
+            ap_mac=ap_mac,
+            client_mac=match.group("client_mac"),
+            reason_code="identity_theft_ip_registration_failed",
+            severity=Severity.ERROR,
+        )
+
+    def _build_capwap_dtls_closed(self, record: RawSyslogRecord, match: re.Match[str]):
+        return self._build_ap_deleted_or_closed(
+            record,
+            match,
+            reason_prefix="capwap_dtls_closed",
+        )
+
+    def _build_lwapp_ap_deleted(self, record: RawSyslogRecord, match: re.Match[str]):
+        return self._build_ap_deleted_or_closed(
+            record,
+            match,
+            reason_prefix="lwapp_ap_deleted",
+        )
+
+    def _build_ap_deleted_or_closed(
+        self,
+        record: RawSyslogRecord,
+        match: re.Match[str],
+        *,
+        reason_prefix: str,
+    ):
+        ap_mac = normalize_mac(match.group("ap_mac")) or normalize_mac(match.group("controller_ap_mac"))
+        reason = self._slug_reason(match.group("reason"))
+        reason_code = f"{reason_prefix}:{reason}" if reason else reason_prefix
+        return self.make_event(
+            record,
+            event_type=EventType.AP_DOWN,
+            device_id=ap_mac or record.sender_ip,
+            ap_name=self._mobility_express_ap_name(record, ap_mac),
+            ap_mac=ap_mac,
+            reason_code=reason_code,
+            severity=Severity.CRITICAL,
         )
 
     def _build_radio_reset(self, record: RawSyslogRecord, match: re.Match[str]):
@@ -392,6 +575,17 @@ class CiscoParser(BaseParser):
 
     def _build_radius_override_disabled(self, record: RawSyslogRecord, match: re.Match[str]):
         return self._build_noise_unknown(record, match.group("ap_mac"), match.group("mnemonic"))
+
+    def _build_log_q_ind_radius_override_disabled(
+        self,
+        record: RawSyslogRecord,
+        match: re.Match[str],
+    ):
+        return self._build_noise_unknown(
+            record,
+            match.group("ap_mac"),
+            "APF-6-RADIUS_OVERRIDE_DISABLED",
+        )
 
     def _build_use_default_cipher_suite(self, record: RawSyslogRecord, match: re.Match[str]):
         return self._build_noise_unknown(
@@ -487,6 +681,47 @@ class CiscoParser(BaseParser):
             ),
         )
 
+    def _build_wme_addts_issue(self, record: RawSyslogRecord, match: re.Match[str]) -> ParseOutcome:
+        reason_by_mnemonic = {
+            "APF-6-PROCESS_WME_ADDTS_REQ_FAILED": "wme:addts_request_parse_failed",
+            "APF-6-NULL_DATA_IN_ADDTS_REQ": "wme:addts_request_null_data",
+        }
+        return self._build_reasoned_unknown(
+            record,
+            match.group("ap_mac"),
+            reason_by_mnemonic[match.group("mnemonic")],
+            client_mac=match.group("client_mac"),
+            severity=Severity.INFO,
+        )
+
+    def _build_client_state_issue(self, record: RawSyslogRecord, match: re.Match[str]) -> ParseOutcome:
+        reason_by_mnemonic = {
+            "APF-4-RCV_INVALID_ACTION_CODE": "client_state:invalid_action_code",
+            "DOT1X-3-CLIENT_NOT_FOUND": "client_state:dot1x_client_not_found",
+        }
+        return self._build_reasoned_unknown(
+            record,
+            match.group("ap_mac"),
+            reason_by_mnemonic[match.group("mnemonic")],
+            client_mac=match.group("client_mac"),
+        )
+
+    def _build_aid_stale_station(self, record: RawSyslogRecord, match: re.Match[str]) -> ParseOutcome:
+        return self._build_reasoned_unknown(
+            record,
+            match.group("ap_mac"),
+            "client_state:aid_stale_station",
+            client_mac=match.group("client_mac"),
+            severity=Severity.INFO,
+        )
+
+    def _build_rrm_missing_ap(self, record: RawSyslogRecord, match: re.Match[str]) -> ParseOutcome:
+        return self._build_reasoned_unknown(
+            record,
+            match.group("ap_mac"),
+            "control_plane:rrm_unable_to_find_ap",
+        )
+
     def _build_log_q_ind_assocreq(self, record: RawSyslogRecord, match: re.Match[str]):
         return self._build_assocreq_failure(record, match, reason_prefix="assocreq_proc_failed")
 
@@ -518,6 +753,44 @@ class CiscoParser(BaseParser):
             match.group("ap_mac"),
             match.group("mnemonic"),
             reason_code="noise:aaa_auth_admin_user",
+        )
+
+    def _build_mm_member_sanity_zero_node(self, record: RawSyslogRecord, match: re.Match[str]):
+        return self._build_noise_unknown(record, match.group("ap_mac"), match.group("mnemonic"))
+
+    def _build_controller_startup_noise(self, record: RawSyslogRecord, match: re.Match[str]):
+        return self._build_noise_unknown(record, match.group("ap_mac"), match.group("mnemonic"))
+
+    def _build_control_plane_issue(self, record: RawSyslogRecord, match: re.Match[str]) -> ParseOutcome:
+        reason = self._slug_reason(match.group("mnemonic")) or "control_plane"
+        return self._build_reasoned_unknown(
+            record,
+            match.group("ap_mac"),
+            f"control_plane:{reason}",
+        )
+
+    def _build_reasoned_unknown(
+        self,
+        record: RawSyslogRecord,
+        ap_mac_raw: str,
+        reason_code: str,
+        *,
+        client_mac: str | None = None,
+        severity: Severity | None = None,
+    ) -> ParseOutcome:
+        ap_mac = normalize_mac(ap_mac_raw)
+        return ParseOutcome(
+            status=ParseStatus.UNKNOWN_EVENT,
+            event=self.make_event(
+                record,
+                event_type=EventType.UNKNOWN_WIFI_EVENT,
+                device_id=ap_mac or record.sender_ip,
+                ap_name=self._mobility_express_ap_name(record, ap_mac),
+                ap_mac=ap_mac,
+                client_mac=client_mac,
+                severity=severity,
+                reason_code=reason_code,
+            ),
         )
 
     def _build_dot1x_11r_forced_auth(self, record: RawSyslogRecord, match: re.Match[str]):

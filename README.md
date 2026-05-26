@@ -143,12 +143,23 @@ Current Cisco normalization includes practical support for:
 Recent Mobility Express-oriented coverage also includes examples such as:
 
 - `DOT1X-3-INVALID_REPLAY_CTR` as `auth_failure`
+- `DOT1X-3-INVALID_WPA_KEY_STATE`, `DOT1X-4-MAX_EAP_RETRIES`,
+  `APF-3-PREAUTH_FAILURE`, and `DOT11-4-CCMP_REPLAY` as `auth_failure`
 - `DOT1X-6-11R_FORCED_AUTH` as `roam_success`
 - `APF-3-ASSOC_REQ_FAILED` as `auth_failure`
+- `APF-6-MOBILE_EXCLUDED` and `APF-4-REGISTER_IPADD_ON_MSCB_FAILED`
+  identity-theft signals as `auth_failure`
+- `CAPWAP-3-DTLS_CLOSED_ERR` and `LWAPP-3-AP_DEL` echo timer expiry
+  messages as AP-scoped `ap_down`
 - `DOT11-5-EXPECTED_RADIO_RESET` as a radio-scoped `ap_down`
 - `DOT11-6-DISASSOC` as `client_disassociated` or `client_deauthenticated`
 - `LINK-6-UPDOWN`, `LINEPROTO-5-UPDOWN`, and `LINK-5-CHANGED` as radio state changes
 - `LOG-4-Q_IND` / `LOG-6-Q_IND` association failures as `auth_failure`
+- WME ADDTS parse/null-data issues, stale AID cleanup, invalid action codes,
+  and client-not-found controller messages as searchable `unknown_wifi_event`
+  records with compact `reason_code` values
+- selected CAPWAP, LWAPP, RRM, and mobility-manager control-plane anomalies as
+  searchable `unknown_wifi_event` records with `control_plane:` reason codes
 
 The Cisco parser also recognizes several controller/AP noise patterns and keeps
 them as `unknown_wifi_event` records tagged with `reason_code` values prefixed
@@ -159,8 +170,11 @@ Current noise tagging includes:
 - `OSAPI-*`
 - `APF-6-RADIUS_OVERRIDE_DISABLED`
 - `APF-6-USE_DEFAULT_CIPHER_SUITE`
-- `LOG-6-Q_IND` when it mirrors the default-cipher controller message
+- `LOG-6-Q_IND` when it mirrors default-cipher or radius-override controller messages
 - `AAA-5-AAA_AUTH_ADMIN_USER`
+- `MM-6-MEMBER_CFGSANITY_ZERONODE` when Cisco explicitly reports no action is needed
+- controller startup/configuration chatter such as `AAA-6-*`, `CCX-6-*`,
+  `DC-6-DC_INIT_INFO`, `SNTP-7-SET_HW_TIME`, and similar one-shot initializers
 - `CLEANAIR-6-STATE` when the state is `enabled`
 
 `CLEANAIR-6-STATE` with `down` is preserved as a low-priority unknown signal
